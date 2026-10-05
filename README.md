@@ -17,6 +17,12 @@ pnpm check        # typecheck every package + run all tests
 
 Copy `.env.example` to `.env` and add a model key when the agent loop lands (M3).
 
+## How this repo is worked on
+
+- **Claude** (cloud) writes the code, tests and docs, and runs the full check before delivering.
+- **Antigravity** (local) handles installs, commits and pushes, following [`HANDOFF.md`](HANDOFF.md).
+- **GitHub Actions** re-runs `pnpm check` on every push (`.github/workflows/ci.yml`).
+
 ## Layout
 
 | Path | What | Status |
