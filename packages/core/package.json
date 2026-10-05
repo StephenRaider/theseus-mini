@@ -1,0 +1,17 @@
+{
+  "name": "@theseus/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The keel: agent loop, plan store, tool router, permission gate, retries, verifier, nudges, event log, model adapter.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@theseus/protocol": "workspace:*",
+    "yaml": "^2.9.1"
+  }
+}

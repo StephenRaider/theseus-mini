@@ -1,0 +1,79 @@
+id: onboard-contractor
+version: 1
+title: Onboard / empanel a contractor
+when_to_use: >
+  A new vendor or contractor needs to be registered in the vendor master,
+  e.g. bidders who qualified on a tender, or a new supplier sending documents.
+sources:
+  - "APQC 8.6.1 Process Accounts Payable: supplier set-up"
+  - "Vendor master best practice: dual approval, employee-address matching (Stampli)"
+  - "Sec. 43B(h): capture Udyam category at onboarding"
+item:
+  kind: contractor
+  plural: contractors
+  discover: >
+    Find the onboarding emails (or the tender's qualified-bidder list) and create
+    one item per contractor, labelled with the contractor's name.
+success_criteria:
+  - Each contractor is either Pending-for-approval / Active in the ERP, or parked with a stated reason the user can act on.
+  - Every vendor-master field equals the value on its source document (with evidence).
+  - No contractor is activated without a human approval (maker-checker).
+rules:
+  - Never activate a vendor yourself; activation always goes through human.request_approval.
+  - Never take bank details from anything other than a bank document (cancelled cheque / bank letter) and penny-drop.
+  - A proprietorship may have a bank account in the proprietor's personal name; ask, don't reject.
+  - Same PAN with a different GSTIN can be another state registration, not a duplicate; explain, don't block.
+steps:
+  - id: collect
+    title: Docs
+    goal: Find the contractor's email and collect GST certificate, PAN, cancelled cheque or bank letter, Udyam certificate (if any) and address.
+    tools: [mail.search, mail.read, mail.download_attachment, mail.draft_reply]
+    checks: [docs_complete]
+    on_fail: needs_you
+    risk: write
+  - id: extract
+    title: Extract
+    goal: Extract legal name, GSTIN, PAN, address + state, bank account, IFSC, account holder name, Udyam number and category, with a source quote for each.
+    tools: [doc.extract_fields]
+    checks: [fields_extracted]
+    on_fail: needs_you
+  - id: gstin
+    title: GSTIN
+    goal: Validate the GSTIN (format, checksum, state matches address, embedded PAN matches PAN) and confirm it is Active on the GST portal.
+    tools: [check.gstin, check.pan, gov.gstin_status]
+    checks: [gstin_valid, gstin_active]
+    on_fail: needs_you
+  - id: bank
+    title: Bank
+    goal: Validate the IFSC and verify the account holder name via penny-drop.
+    tools: [check.ifsc, bank.penny_drop]
+    checks: [ifsc_valid, account_name_matches]
+    on_fail: needs_you
+  - id: msme
+    title: MSME
+    goal: Record the Udyam category (micro / small / medium / none) so payment deadlines can be enforced.
+    tools: []
+    checks: [msme_classified]
+    on_fail: continue
+  - id: risk
+    title: Risk
+    goal: Check for duplicate vendors, conflicts with employees (address / bank account) and the debarment register.
+    tools: [match.find_duplicates, vendor.search, hr.search_employees, lists.check_debarment]
+    checks: [no_duplicates, no_employee_conflict, not_debarred]
+    on_fail: needs_you
+  - id: create
+    title: Create
+    goal: Create the vendor in the ERP as Pending with the verified fields, and attach the evidence.
+    tools: [vendor.create_pending, vendor.update_pending, vendor.get]
+    checks: [vendor_pending_created]
+    on_fail: needs_you
+    risk: write
+  - id: approve
+    title: Approve
+    goal: Ask the user to approve activation (maker-checker), showing the fields and the evidence. Activate only after approval.
+    tools: [human.request_approval, vendor.activate]
+    checks: [maker_checker_approved]
+    on_fail: needs_you
+    risk: irreversible
+widget:
+  type: item_grid

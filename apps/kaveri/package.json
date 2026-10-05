@@ -1,0 +1,13 @@
+{
+  "name": "@theseus/kaveri",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock company Kaveri Infra Pvt Ltd: mail, ERP, bank portal, gov lookup, with seed data, faults and ground truth.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

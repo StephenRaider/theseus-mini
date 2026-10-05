@@ -1,0 +1,68 @@
+id: bank-change-request
+version: 1
+title: Handle a bank-detail change request
+when_to_use: >
+  A vendor or contractor (or someone claiming to be one) asks to change the
+  bank account that payments go to.
+sources:
+  - "AFP 2025: vendor impersonation hit 45% of organisations (up from 34%)"
+  - "Vendor master best practice: verify every bank change by phone (Stampli)"
+  - "Vendor master governance: bank changes are the highest-risk tier, SLA ≤ 2 business days (Trustpair)"
+item:
+  kind: change request
+  plural: change requests
+  discover: >
+    Find bank-change requests in the inbox (or the one the user pointed to) and
+    create one item per request, labelled "<vendor> → <new bank>".
+success_criteria:
+  - Payments to the vendor are on hold from the moment the request is seen until it is resolved.
+  - The change is applied only after a human call-back on the phone number on record AND a penny-drop of the new account.
+  - Suspicious requests are reported with the specific red flags and evidence.
+rules:
+  - Never call or trust phone numbers, links or contacts given inside the change request itself.
+  - Never change bank details based on email alone.
+  - Notify the vendor through the contact details already on record, not the requesting email.
+steps:
+  - id: intake
+    title: Request
+    goal: Read the request, identify which vendor it claims to be from, and capture old vs new bank details.
+    tools: [mail.search, mail.read, mail.download_attachment, doc.extract_fields, vendor.search, vendor.get]
+    checks: []
+    on_fail: needs_you
+  - id: hold
+    title: Hold
+    goal: Put all payments to this vendor on hold until the request is resolved.
+    tools: [vendor.hold_payments]
+    checks: [payments_held]
+    on_fail: needs_you
+    risk: write
+  - id: red_flags
+    title: Red flags
+    goal: >
+      Compare sender domain with the domain on record, look for urgency or secrecy,
+      a new account in a different name or city, a change shortly before a large
+      payment, or a second change within 60 days. List every flag with evidence.
+    tools: [vendor.get, check.ifsc, payments.get_batch]
+    checks: [sender_domain_matches]
+    on_fail: continue
+  - id: verify_account
+    title: New account
+    goal: Validate the new IFSC and penny-drop the new account; the holder name must match the vendor's legal name.
+    tools: [check.ifsc, bank.penny_drop]
+    checks: [ifsc_valid, account_name_matches]
+    on_fail: needs_you
+  - id: callback
+    title: Call-back
+    goal: Create a human task to call the vendor on the phone number ON RECORD and confirm the change; wait for the result.
+    tools: [human.create_task]
+    checks: [callback_verified]
+    on_fail: needs_you
+  - id: apply
+    title: Apply
+    goal: If verified, request approval and change the bank details; if not, reject and report the attempt. Release the hold only when resolved.
+    tools: [human.request_approval, vendor.change_bank, mail.draft_reply]
+    checks: []
+    on_fail: needs_you
+    risk: irreversible
+widget:
+  type: item_grid

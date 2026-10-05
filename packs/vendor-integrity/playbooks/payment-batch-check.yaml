@@ -1,0 +1,63 @@
+id: payment-batch-check
+version: 1
+title: Pre-payment integrity check
+when_to_use: >
+  A payment batch (RA bills / vendor payments) is about to be released and
+  needs an integrity check line by line.
+sources:
+  - "Ardent Partners State of ePayables 2025: 18.4% average invoice exception rate"
+  - "ACFE Report to the Nations 2024: billing schemes; ~5% of revenue lost to fraud"
+  - "Income-tax Act 2025 Sec. 393 (ex-194C): contractor TDS 1% / 2% / 20% without PAN"
+  - "Income-tax Act Sec. 43B(h): pay micro/small enterprises within 15/45 days"
+item:
+  kind: payment line
+  plural: payment lines
+  discover: Read the batch the user named and create one item per payment line, labelled "<vendor> · <bill no> · ₹<amount>".
+success_criteria:
+  - Every line is either cleared, corrected (with the correction shown), or held with a reason.
+  - No line pays to a bank account different from the verified vendor master.
+  - The batch is never released without human approval.
+rules:
+  - Holding a line is cheap; paying a wrong line is expensive. When unsure, hold and explain.
+  - Do not release the batch yourself; report and let the user release it.
+steps:
+  - id: vendor
+    title: Vendor
+    goal: Confirm the vendor is Active and not debarred.
+    tools: [vendor.get, lists.check_debarment]
+    checks: [vendor_active]
+    on_fail: needs_you
+  - id: bank
+    title: Bank
+    goal: Confirm the line's bank account equals the vendor master, and flag accounts changed in the last 30 days.
+    tools: [vendor.get]
+    checks: [bank_matches_master, no_recent_bank_change]
+    on_fail: needs_you
+  - id: duplicate
+    title: Duplicate
+    goal: Check for a duplicate bill (same vendor + bill number, or same amount within 30 days).
+    tools: [payments.get_batch, vendor.get]
+    checks: [no_duplicate_bill]
+    on_fail: needs_you
+  - id: tds
+    title: TDS
+    goal: Recompute contractor TDS and correct the line if it differs.
+    tools: [rules.contractor_tds, payments.correct_line]
+    checks: [tds_correct]
+    on_fail: needs_you
+    risk: write
+  - id: msme
+    title: MSME
+    goal: For micro/small vendors compute the 43B(h) deadline and flag lines due soon or overdue.
+    tools: [rules.msme_deadline]
+    checks: [msme_deadline_ok]
+    on_fail: continue
+  - id: decide
+    title: Decide
+    goal: Mark the line cleared, or hold it with a clear reason and the evidence.
+    tools: [payments.hold_line]
+    checks: []
+    on_fail: needs_you
+    risk: write
+widget:
+  type: item_grid

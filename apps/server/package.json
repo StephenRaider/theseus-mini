@@ -1,0 +1,17 @@
+{
+  "name": "@theseus/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runs employees, stores events, serves the WebSocket API.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@theseus/protocol": "workspace:*",
+    "@theseus/core": "workspace:*"
+  }
+}

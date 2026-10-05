@@ -1,0 +1,16 @@
+{
+  "name": "@theseus/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared contract: types and schemas for employees, tasks, plans, events, commands, tools, widgets and planks.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  }
+}

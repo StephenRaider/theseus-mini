@@ -1,0 +1,29 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+data/*.sqlite*
+.vite/
+coverage/
+
+# Obsidian workspace / settings
+.obsidian/
+
+# Private notes (kept locally in the vault, not published)
+docs/Build Log*.md
+docs/Setup - API Keys & Credits (India).md
+docs/Field Interview Guide.md
+
+# OS / editor noise
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# One-time local setup script
+setup-repo.ps1

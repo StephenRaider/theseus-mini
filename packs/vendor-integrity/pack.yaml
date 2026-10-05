@@ -1,0 +1,69 @@
+# Role pack: Vendor & Contractor Integrity Specialist
+# Makes sure the company only pays the right party, the right amount, into the
+# right account. See vault/Role Dossier - Vendor & Contractor Integrity.md
+id: vendor-integrity
+name: Vendor & Contractor Integrity Specialist
+version: 1
+company: Kaveri Infra Pvt Ltd (fictional)
+grounding:
+  - "APQC PCF 8.6.1 Process Accounts Payable (supplier set-up and maintenance)"
+  - "O*NET 43-3031 Bookkeeping, Accounting & Auditing Clerks; 43-3061 Procurement Clerks"
+  - "AFP 2025 Payments Fraud & Control Survey (vendor impersonation 45%)"
+  - "Income-tax Act 2025 Sec. 393 (ex-194C); Income-tax Act Sec. 43B(h) / MSMED Act Sec. 15"
+
+# Every tool a playbook step may use. Risk tiers follow Framework Spec §3.
+tools:
+  - { name: mail.search, risk: read, description: "Search the company inbox" }
+  - { name: mail.read, risk: read, description: "Read one email with headers" }
+  - { name: mail.download_attachment, risk: read, description: "Fetch an attachment for reading" }
+  - { name: mail.draft_reply, risk: write, description: "Save a draft reply (not sent)" }
+  - { name: mail.send, risk: irreversible, description: "Send an email outside the company" }
+  - { name: doc.extract_fields, risk: read, description: "Extract named fields from a document, with source quotes" }
+  - { name: check.gstin, risk: read, description: "GSTIN format, checksum, state and embedded-PAN checks" }
+  - { name: check.pan, risk: read, description: "PAN format and holder type" }
+  - { name: check.ifsc, risk: read, description: "IFSC existence (offline dataset) + branch details (live API)" }
+  - { name: gov.gstin_status, risk: read, description: "GST portal lookup: status and legal name" }
+  - { name: bank.penny_drop, risk: read, description: "Verify account holder name for an account + IFSC" }
+  - { name: bank.verify_guarantee, risk: read, description: "Ask the issuing bank to confirm a bank guarantee" }
+  - { name: vendor.search, risk: read, description: "Search the vendor master" }
+  - { name: vendor.get, risk: read, description: "Read one vendor with change history" }
+  - { name: vendor.create_pending, risk: write, description: "Create a vendor in Pending status" }
+  - { name: vendor.update_pending, risk: write, description: "Edit a vendor that is still Pending" }
+  - { name: vendor.activate, risk: irreversible, description: "Activate a vendor (maker-checker)" }
+  - { name: vendor.change_bank, risk: irreversible, description: "Change a vendor's bank account" }
+  - { name: vendor.hold_payments, risk: write, description: "Put all payments to a vendor on hold" }
+  - { name: match.find_duplicates, risk: read, description: "Find likely duplicate vendors" }
+  - { name: hr.search_employees, risk: read, description: "Search employee addresses and bank accounts for conflicts" }
+  - { name: lists.check_debarment, risk: read, description: "Check the debarment / blacklist register" }
+  - { name: payments.get_batch, risk: read, description: "Read a payment batch and its lines" }
+  - { name: payments.hold_line, risk: write, description: "Hold one payment line with a reason" }
+  - { name: payments.correct_line, risk: write, description: "Correct a deduction on a payment line" }
+  - { name: payments.release_batch, risk: irreversible, description: "Release a payment batch to the bank" }
+  - { name: rules.contractor_tds, risk: read, description: "Compute contractor TDS (Sec. 393, ex-194C)" }
+  - { name: rules.msme_deadline, risk: read, description: "Compute the MSME 45-day deadline (Sec. 43B(h))" }
+  - { name: human.request_approval, risk: read, description: "Ask the user to approve an action, with diff and evidence" }
+  - { name: human.create_task, risk: read, description: "Give the user a task only a human can do (e.g. a phone call)" }
+
+# Checks a step can require. deterministic = code decides; judged = LLM decides from evidence.
+checks:
+  - { id: docs_complete, kind: judged, description: "All required documents are present and readable" }
+  - { id: fields_extracted, kind: judged, description: "Every master field has a value with a source quote" }
+  - { id: gstin_valid, kind: deterministic, description: "GSTIN passes format, checksum, state and PAN cross-checks" }
+  - { id: gstin_active, kind: deterministic, description: "GST portal shows the GSTIN as Active with a matching legal name" }
+  - { id: ifsc_valid, kind: deterministic, description: "IFSC exists in the IFSC dataset" }
+  - { id: account_name_matches, kind: judged, description: "Penny-drop name matches the legal name (or a declared proprietor)" }
+  - { id: msme_classified, kind: deterministic, description: "Udyam category recorded (micro/small/medium/none)" }
+  - { id: no_duplicates, kind: deterministic, description: "No existing vendor shares GSTIN/bank account, no unexplained name/PAN match" }
+  - { id: no_employee_conflict, kind: deterministic, description: "Address and bank account don't match any employee" }
+  - { id: not_debarred, kind: deterministic, description: "Not on the debarment register" }
+  - { id: vendor_pending_created, kind: deterministic, description: "ERP shows the vendor as Pending with fields equal to the evidence" }
+  - { id: maker_checker_approved, kind: deterministic, description: "A human approved activation" }
+  - { id: sender_domain_matches, kind: deterministic, description: "Request came from the email domain on record" }
+  - { id: callback_verified, kind: deterministic, description: "A human confirmed by phone using the number on record" }
+  - { id: payments_held, kind: deterministic, description: "Vendor's payments are on hold while the change is verified" }
+  - { id: bank_matches_master, kind: deterministic, description: "Payment line bank account equals the vendor master" }
+  - { id: no_recent_bank_change, kind: deterministic, description: "Bank account not changed in the last 30 days (else needs review)" }
+  - { id: no_duplicate_bill, kind: deterministic, description: "No other bill with the same vendor + number, or same amount in the window" }
+  - { id: vendor_active, kind: deterministic, description: "Vendor is Active and not debarred" }
+  - { id: tds_correct, kind: deterministic, description: "TDS on the line equals the Sec. 393 computation" }
+  - { id: msme_deadline_ok, kind: deterministic, description: "MSME deadline status computed and line prioritised if due" }

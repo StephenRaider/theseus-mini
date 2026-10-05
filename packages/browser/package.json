@@ -1,0 +1,16 @@
+{
+  "name": "@theseus/browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright wrapper: page snapshots with element refs, actions, screenshots.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@theseus/protocol": "workspace:*"
+  }
+}
