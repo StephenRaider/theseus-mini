@@ -297,6 +297,7 @@ export const BANK_REGISTRY: Record<string, string> = Object.fromEntries([
 const CORE_GUARANTEES = [
   { number: "PBG/HDFC/2026/88123", issuingBank: "HDFC Bank, Bidadi", amount: 1_250_000, validUntil: "2027-10-31", genuine: true },
   { number: "PBG/SBI/2026/40917", issuingBank: "State Bank of India, Mysuru", amount: 980_000, validUntil: "2027-09-30", genuine: false }, // TRAP T-FAKE-BG
+  { number: "PBG/ICICI/2026/55120", issuingBank: "ICICI Bank, Channapatna", amount: 1_100_000, validUntil: "2027-08-31", genuine: true },
 ];
 
 export const GUARANTEES = [...CORE_GUARANTEES, ...fillerGuarantees()];
@@ -307,10 +308,40 @@ const CORE_TENDERS = [
     title: "Resurfacing of NH-948 service road, Ramanagara (Package 2)",
     qualifiedBidders: Object.values(BIDDERS).map((b) => b.legalName),
     status: "evaluation" as const,
+    publishedOn: "2026-08-18",
+    estimatedValue: 48_600_000,
+    // On eProcure: each bidder's bid form + bid-security (EMD) bank guarantee to be confirmed with the bank.
+    bidders: [
+      { legalName: BIDDERS.A.legalName, bidAmount: 46_950_000, emdGuarantee: "PBG/HDFC/2026/88123", documents: { "Bid_Form_Nandi_Roadways.pdf": "bidform:A", "EMD_Guarantee_HDFC.pdf": "emdbg:A" } },
+      { legalName: BIDDERS.B.legalName, bidAmount: 47_400_000, emdGuarantee: "PBG/ICICI/2026/55120", documents: { "Bid_Form_Vrishabha.pdf": "bidform:B", "EMD_Guarantee_ICICI.pdf": "emdbg:B" } },
+      { legalName: BIDDERS.C.legalName, bidAmount: 45_880_000, emdGuarantee: "PBG/SBI/2026/40917", documents: { "Bid_Form_Sri_Lakshmi.pdf": "bidform:C", "EMD_Guarantee_SBI.pdf": "emdbg:C" } },
+    ],
   },
 ];
 
 export const TENDERS = [...CORE_TENDERS, ...fillerTenders(FILLER_VENDORS)];
+
+/* ------------------------------------------------------ Udyam registry */
+
+/** Government MSME registry: every Udyam number in the world, as the Udyam portal knows it. */
+export const UDYAM_REGISTRY = [
+  ...VENDORS.filter((v) => v.udyam).map((v) => ({
+    number: v.udyam!.number,
+    enterpriseName: v.legalName.toUpperCase(),
+    category: v.udyam!.category,
+    classifiedOn: "2025-04-01",
+    state: v.state,
+    status: "Active" as const,
+  })),
+  ...[BIDDERS.A, BIDDERS.C].map((b) => ({
+    number: b.udyam.number,
+    enterpriseName: b.legalName.toUpperCase(),
+    category: b.udyam.category,
+    classifiedOn: "2025-04-01",
+    state: b.state,
+    status: "Active" as const,
+  })),
+];
 
 /* --------------------------------------------------------- payment batch */
 
@@ -558,6 +589,8 @@ export function initialState(): KaveriState {
     batches: [BATCH],
     paidBills: PAID_BILLS,
     mail: MAIL,
+    udyamRegistry: UDYAM_REGISTRY,
+    paymentFiles: [],
     auditLog: [],
   }) as KaveriState;
 }

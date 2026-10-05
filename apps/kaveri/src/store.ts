@@ -1,4 +1,4 @@
-import type { BankAccount, Email, KaveriState, PaymentBatch, PaymentLine, UdyamCategory, Vendor } from "./domain.ts";
+import type { Attachment, BankAccount, Email, KaveriState, PaymentBatch, PaymentFile, PaymentFileRow, PaymentLine, UdyamCategory, Vendor } from "./domain.ts";
 import { initialState } from "./seed/scenario.ts";
 
 /** Business error with an HTTP status and a stable code the agent can classify. */
@@ -34,13 +34,23 @@ const isHumanApprover = (by: string | undefined) => !!by && by.startsWith("user:
 export class Kaveri {
   state: KaveriState = initialState();
   faults: FaultConfig = structuredClone(NO_FAULTS);
+  /** Files uploaded through the sites (mail attachments): kept out of `state` so /__admin/state stays small. */
+  uploads = new Map<string, { name: string; mime: string; data: Buffer }>();
   private rngState = NO_FAULTS.seed;
   private seq = 0;
+  /** Hooks run after reset (e.g. regenerate the local workspace). */
+  onReset: Array<() => void | Promise<void>> = [];
 
-  reset(faults: Partial<FaultConfig> = {}) {
+  async reset(faults: Partial<FaultConfig> = {}) {
     this.state = initialState();
     this.setFaults({ ...NO_FAULTS, ...faults });
     this.seq = 0;
+    this.uploads.clear();
+    for (const h of this.onReset) await h();
+  }
+
+  private nextId(prefix: string) {
+    return `${prefix}${String(++this.seq).padStart(3, "0")}`;
   }
 
   setFaults(f: Partial<FaultConfig>) {
@@ -100,9 +110,18 @@ export class Kaveri {
     return a.docKey;
   }
 
-  saveDraft(input: { to: string; subject: string; body: string }, by: string): Email {
+  saveDraft(
+    input: { to: string; subject: string; body: string; files?: { name: string; mime: string; data: Buffer }[] },
+    by: string,
+  ): Email {
+    const attachments: Attachment[] = (input.files ?? []).map((f) => {
+      const key = `upload:${this.nextId("f")}`;
+      this.uploads.set(key, f);
+      return { name: f.name, mime: f.mime, docKey: key };
+    });
+    if (!input.to.includes("@")) throw new KaveriError(422, "INVALID_RECIPIENT", "Recipient must be an email address");
     const draft: Email = {
-      id: `msg_d${String(++this.seq).padStart(3, "0")}`,
+      id: this.nextId("msg_d"),
       folder: "drafts",
       from: "ap@kaveriinfra.example",
       fromName: "Kaveri Infra · Accounts Payable",
@@ -110,7 +129,7 @@ export class Kaveri {
       subject: input.subject,
       body: input.body,
       receivedAt: this.now(),
-      attachments: [],
+      attachments,
       read: true,
     };
     this.state.mail.push(draft);
@@ -270,6 +289,97 @@ export class Kaveri {
   searchDebarment(q = "") {
     const n = norm(q);
     return this.state.debarment.filter((d) => !n || norm(`${d.name} ${d.pan ?? ""}`).includes(n));
+  }
+
+  udyamLookup(number: string) {
+    const r = this.state.udyamRegistry.find((u) => u.number === number.trim().toUpperCase());
+    if (!r) throw new KaveriError(404, "NOT_FOUND", `Udyam number ${number} not found`);
+    return r;
+  }
+
+  /* ---------------------------------------------------------- eProcure */
+
+  listTenders() {
+    return this.state.tenders.map(({ bidders: _b, ...t }) => t);
+  }
+
+  getTender(id: string) {
+    const t = this.state.tenders.find((x) => x.id === id);
+    if (!t) throw new KaveriError(404, "NOT_FOUND", `No tender ${id}`);
+    return t;
+  }
+
+  tenderDocKey(id: string, name: string): string {
+    for (const b of this.getTender(id).bidders ?? []) if (b.documents[name]) return b.documents[name]!;
+    throw new KaveriError(404, "NOT_FOUND", `Tender ${id} has no document "${name}"`);
+  }
+
+  /* ------------------------------------------------- bank: payment files */
+
+  /**
+   * Bulk payment upload (CSV). Header: beneficiary_name,account_number,ifsc,amount,reference
+   * The bank validates format only (like NEFT bulk upload); it does NOT know the vendor master.
+   * Maker (uploader) ≠ checker (authoriser), and the checker must be a human.
+   */
+  uploadPaymentFile(filename: string, csv: string, by: string): PaymentFile {
+    const lines = csv.replace(/^\uFEFF/, "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const header = (lines.shift() ?? "").toLowerCase().replace(/\s+/g, "");
+    const expected = "beneficiary_name,account_number,ifsc,amount,reference";
+    if (header !== expected) throw new KaveriError(422, "INVALID_FORMAT", `CSV header must be: ${expected}`);
+    if (!lines.length) throw new KaveriError(422, "EMPTY_FILE", "The file has no payment rows");
+    const seen = new Set<string>();
+    const rows: PaymentFileRow[] = lines.map((l, i) => {
+      const [beneficiaryName = "", accountNumber = "", ifsc = "", amountStr = "", reference = ""] = l.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+      const amount = Number(amountStr);
+      let error: string | undefined;
+      if (!beneficiaryName) error = "Beneficiary name missing";
+      else if (!/^[0-9]{6,18}$/.test(accountNumber)) error = "Invalid account number";
+      else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc.toUpperCase())) error = "Invalid IFSC";
+      else if (!(amount > 0)) error = "Amount must be positive";
+      else if (!reference) error = "Reference missing";
+      else if (seen.has(reference)) error = `Duplicate reference ${reference}`;
+      seen.add(reference);
+      return { row: i + 1, beneficiaryName, accountNumber, ifsc: ifsc.toUpperCase(), amount, reference, valid: !error, ...(error ? { error } : {}) };
+    });
+    const file: PaymentFile = {
+      id: this.nextId("BBF-"),
+      filename,
+      uploadedBy: by,
+      uploadedAt: this.now(),
+      status: "pending_authorisation",
+      rows,
+      totalAmount: rows.filter((r) => r.valid).reduce((a, r) => a + r.amount, 0),
+    };
+    this.state.paymentFiles.push(file);
+    this.audit(by, "bank.upload_payment_file", `${file.id} ${filename}: ${rows.length} rows, ${rows.filter((r) => !r.valid).length} invalid`);
+    return file;
+  }
+
+  getPaymentFile(id: string): PaymentFile {
+    const f = this.state.paymentFiles.find((x) => x.id === id);
+    if (!f) throw new KaveriError(404, "NOT_FOUND", `No payment file ${id}`);
+    return f;
+  }
+
+  authorisePaymentFile(id: string, approvedBy: string | undefined): PaymentFile {
+    const f = this.getPaymentFile(id);
+    if (f.status !== "pending_authorisation") throw new KaveriError(409, "NOT_PENDING", `${id} is ${f.status}`);
+    if (!isHumanApprover(approvedBy)) throw new KaveriError(403, "APPROVAL_REQUIRED", "Authorising payments requires a human checker (approvedBy: user:…)");
+    if (approvedBy === f.uploadedBy) throw new KaveriError(403, "MAKER_CHECKER", "The uploader cannot authorise their own file");
+    if (f.rows.some((r) => !r.valid)) throw new KaveriError(409, "INVALID_ROWS", "Fix or remove invalid rows before authorising");
+    f.status = "authorised";
+    f.authorisedBy = approvedBy;
+    this.audit(approvedBy!, "bank.authorise_payment_file", `${id}: ${f.rows.length} payments, ${f.totalAmount}`);
+    return f;
+  }
+
+  rejectPaymentFile(id: string, by: string, note: string): PaymentFile {
+    const f = this.getPaymentFile(id);
+    if (f.status !== "pending_authorisation") throw new KaveriError(409, "NOT_PENDING", `${id} is ${f.status}`);
+    f.status = "rejected";
+    f.note = note;
+    this.audit(by, "bank.reject_payment_file", `${id}: ${note}`);
+    return f;
   }
 
   /* --------------------------------------------------------- payments */

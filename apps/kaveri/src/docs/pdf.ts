@@ -106,6 +106,33 @@ const arkaChangeLetter = () =>
     { text: "Branch Manager (signed)" },
   ]);
 
+const bidForm = (b: Bidder, tenderBid: { amount: number; emd: string }) =>
+  render("Bid Form: Tender T-2026-14", "Kaveri eProcure · Resurfacing of NH-948 service road, Ramanagara (Package 2)", [
+    kv("Bidder", b.legalName),
+    kv("PAN (as declared)", "panOnCard" in b ? b.panOnCard : b.pan),
+    kv("GSTIN", b.gstin),
+    kv("Registered address", b.address),
+    kv("Contact", `${b.email} · ${b.phone}`),
+    kv("Quoted amount", `Rs. ${tenderBid.amount.toLocaleString("en-IN")}`),
+    kv("Bid security (EMD)", `Bank guarantee ${tenderBid.emd}`),
+    { text: "", gap: 10 },
+    { text: "We declare that the information furnished above is true and correct.", size: 10 },
+    { text: "Authorised Signatory (signed)", size: 10 },
+  ]);
+
+const emdGuarantee = (b: Bidder, g: { number: string; bank: string; amount: number; until: string }) =>
+  render("Bank Guarantee: Bid Security (EMD)", g.bank, [
+    kv("Guarantee No.", g.number),
+    kv("Beneficiary", COMPANY.name),
+    kv("On behalf of", b.legalName),
+    kv("Amount", `Rs. ${g.amount.toLocaleString("en-IN")}`),
+    kv("Valid until", g.until),
+    kv("Tender", "T-2026-14"),
+    { text: "", gap: 10 },
+    { text: "We undertake to pay the beneficiary on first written demand without demur.", size: 10 },
+    { text: "Authorised Officer (signed and sealed)", size: 10 },
+  ]);
+
 function constitution(pan: string): string {
   return ({ P: "Proprietorship", F: "Partnership / LLP", C: "Private Limited Company" } as Record<string, string>)[pan[3]!] ?? "Other";
 }
@@ -125,6 +152,12 @@ const GENERATORS: Record<string, () => Promise<Uint8Array>> = {
   "cheque:C": () => cheque(BIDDERS.C),
   "udyam:A": () => udyam(BIDDERS.A),
   "udyam:C": () => udyam(BIDDERS.C),
+  "bidform:A": () => bidForm(BIDDERS.A, { amount: 46_950_000, emd: "PBG/HDFC/2026/88123" }),
+  "bidform:B": () => bidForm(BIDDERS.B, { amount: 47_400_000, emd: "PBG/ICICI/2026/55120" }),
+  "bidform:C": () => bidForm(BIDDERS.C, { amount: 45_880_000, emd: "PBG/SBI/2026/40917" }),
+  "emdbg:A": () => emdGuarantee(BIDDERS.A, { number: "PBG/HDFC/2026/88123", bank: "HDFC Bank, Bidadi", amount: 1_250_000, until: "31/10/2027" }),
+  "emdbg:B": () => emdGuarantee(BIDDERS.B, { number: "PBG/ICICI/2026/55120", bank: "ICICI Bank, Channapatna", amount: 1_100_000, until: "31/08/2027" }),
+  "emdbg:C": () => emdGuarantee(BIDDERS.C, { number: "PBG/SBI/2026/40917", bank: "State Bank of India, Mysuru", amount: 980_000, until: "30/09/2027" }),
   "bankchange:SG": sgChangeLetter,
   "bankchange:ARKA": arkaChangeLetter,
 };

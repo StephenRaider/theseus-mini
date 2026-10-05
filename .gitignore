@@ -44,3 +44,7 @@ Claude outputs/
 
 # Generated working files (agent workspace, exports, reports)
 workspace/
+
+# Backups (e.g. before history rewrites) must never be committed
+*.bundle
+*backup*/

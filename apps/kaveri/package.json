@@ -10,15 +10,21 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "world:reset": "tsx src/reset-workspace.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^8.0.2",
+    "@fastify/multipart": "^9.4.0",
+    "docx": "^9.8.1",
+    "exceljs": "^4.4.0",
     "fastify": "^5.12.5",
     "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
     "@theseus/pack-vendor-integrity": "workspace:*",
+    "docxtemplater": "^3.71.0",
+    "pizzip": "^3.3.0",
     "tsx": "^4.19.0"
   }
 }

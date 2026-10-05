@@ -1,10 +1,13 @@
-import { buildServer } from "./server.ts";
+import { startWorld } from "./sites/index.ts";
 
-const port = Number(process.env.KAVERI_PORT ?? 4100);
-const app = buildServer();
-await app.listen({ port, host: "127.0.0.1" });
-console.log(`Kaveri Infra mock company running at http://localhost:${port}`);
-console.log(`  Mail      http://localhost:${port}/mail`);
-console.log(`  Vendors   http://localhost:${port}/erp/vendors`);
-console.log(`  Payments  http://localhost:${port}/erp/payments/PB-2026-W41`);
-console.log(`  Admin     http://localhost:${port}/admin   (reset, faults, planted traps)`);
+const { urls, workspaceDir } = await startWorld();
+console.log("\nKaveri Infra world is running (simulation; fictional data)\n");
+console.log(`  Control Room   ${urls.control}   (reset · faults · ground truth; hidden from agents)`);
+console.log(`  Kaveri Mail    ${urls.mail}`);
+console.log(`  Kaveri ERP     ${urls.erp}`);
+console.log(`  Bharat Bank    ${urls.bank}`);
+console.log(`  GST Portal     ${urls.gst}`);
+console.log(`  Udyam Portal   ${urls.udyam}`);
+console.log(`  eProcure       ${urls.eproc}`);
+console.log(`\n  Workspace      ${workspaceDir}\n`);
+console.log("Stop with Ctrl+C.");

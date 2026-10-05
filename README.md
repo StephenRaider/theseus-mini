@@ -4,7 +4,7 @@ A harness for **AI employees** that take a goal, plan, use real tools, recover f
 
 The first employee is a **Vendor & Contractor Integrity Specialist** at *Kaveri Infra Pvt Ltd* (fictional). Its job is to make sure the company only pays the right party, the right amount, into the right account.
 
-> Status: **M2, the world.** Contracts, role pack, deterministic checks and the mock company *Kaveri Infra* (mail, ERP, bank, GST portal) with 12 planted real-world traps. Next: the three-column UI.
+> Status: **M2b, multi-surface world.** Contracts, role pack, deterministic checks and the mock company *Kaveri Infra*: six separate websites plus a local workspace of real Excel/PDF/Word files, with 12 planted real-world traps. Next: the three-column UI.
 
 ## Quick start
 
@@ -15,10 +15,11 @@ pnpm install
 pnpm check        # typecheck every package + run all tests
 ```
 
-Run the mock company and open it in a browser:
+Run the mock company (seven local sites + a workspace folder):
 
 ```bash
-pnpm kaveri       # → http://localhost:4100  (Mail · Vendors · Payments · GST Portal · Bank · HR · Admin)
+pnpm kaveri        # Control Room http://localhost:4100 · Mail :4101 · ERP :4102 · Bharat Bank :4103 · GST :4104 · Udyam :4105 · eProcure :4106
+pnpm world:reset   # regenerate ./workspace (Vendor Register.xlsx, policy PDF, Word templates) without starting the sites
 ```
 
 Copy `.env.example` to `.env` and add a model key when the agent loop lands.
@@ -37,7 +38,7 @@ Copy `.env.example` to `.env` and add a model key when the agent loop lands.
 | `packages/core` | The **keel**: agent loop, tool router, permission gate, retries, verifier, event log. M1 has role-pack loading with guard rails | 🟡 |
 | `packages/browser` | Playwright wrapper | ⏳ |
 | `packs/vendor-integrity` | Role pack: `pack.yaml`, 3 playbooks, and deterministic validators (GSTIN, PAN, IFSC, TDS Sec. 393, MSME 43B(h), duplicate matching) | ✅ M1 |
-| `apps/kaveri` | Mock company *Kaveri Infra Pvt Ltd*: mail with real PDF attachments, ERP (vendor master with maker-checker, payment batches), bank (penny-drop, guarantee confirmation), GST portal, HR and debarment lists. Seeded scenario with 12 traps, fault injection, ground truth at `/__admin` | ✅ M2 |
+| `apps/kaveri` | Mock company *Kaveri Infra Pvt Ltd* as **separate sites**: Mail (attachments, drafts), ERP (vendor master with maker-checker, payment batch + Excel export, HR/debarment), Bharat Bank (penny-drop, guarantee confirmation, bulk payment upload with maker-checker), GST portal, Udyam portal, eProcure (tender + bidder docs). Local **workspace** of real `.xlsx`/`.pdf`/`.docx` files. Seeded scenario (12 traps), fault injection, Control Room with ground truth | ✅ M2b |
 | `apps/server` | Runs employees, stores events, WebSocket API | ⏳ |
 | `apps/web` | Three-column UI | ⏳ |
 | `evals` | Task suite + pass^k reports | ⏳ |

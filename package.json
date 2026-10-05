@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "pnpm typecheck && pnpm test",
-    "kaveri": "pnpm --filter @theseus/kaveri dev"
+    "kaveri": "pnpm --filter @theseus/kaveri dev",
+    "world:reset": "pnpm --filter @theseus/kaveri world:reset"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

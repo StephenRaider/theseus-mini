@@ -122,8 +122,8 @@ export interface PaidBill {
 
 export interface Attachment {
   name: string;
-  mime: "application/pdf";
-  /** Key into the generated document registry (docs/pdf.ts). */
+  mime: string;
+  /** Key into the generated document registry (docs/pdf.ts), or "upload:<id>" for uploaded files. */
   docKey: string;
 }
 
@@ -140,11 +140,56 @@ export interface Email {
   read: boolean;
 }
 
+export interface TenderBidder {
+  legalName: string;
+  bidAmount: number;
+  /** Bid security (EMD) submitted as a bank guarantee: number to confirm with the issuing bank. */
+  emdGuarantee?: string;
+  /** Documents downloadable from eProcure for this bidder: file name → document key. */
+  documents: Record<string, string>;
+}
+
 export interface Tender {
   id: string;
   title: string;
   qualifiedBidders: string[]; // legal names
   status: "awarded" | "evaluation";
+  publishedOn?: string;
+  estimatedValue?: number;
+  bidders?: TenderBidder[];
+}
+
+export interface UdyamRecord {
+  number: string;
+  enterpriseName: string;
+  category: UdyamCategory;
+  classifiedOn: string;
+  state: string;
+  status: "Active" | "Cancelled";
+}
+
+export interface PaymentFileRow {
+  row: number;
+  beneficiaryName: string;
+  accountNumber: string;
+  ifsc: string;
+  amount: number;
+  reference: string;
+  valid: boolean;
+  error?: string;
+}
+
+/** A bulk payment file uploaded to the bank portal: maker uploads, a different human authorises. */
+export interface PaymentFile {
+  id: string;
+  filename: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  status: "pending_authorisation" | "authorised" | "rejected";
+  rows: PaymentFileRow[];
+  totalAmount: number;
+  authorisedBy?: string;
+  note?: string;
 }
 
 export interface KaveriState {
@@ -161,6 +206,8 @@ export interface KaveriState {
   batches: PaymentBatch[];
   paidBills: PaidBill[];
   mail: Email[];
+  udyamRegistry: UdyamRecord[];
+  paymentFiles: PaymentFile[];
   /** Human tasks / approvals recorded by the company side (call-backs etc.). */
   auditLog: { at: string; actor: string; action: string; detail: string }[];
 }

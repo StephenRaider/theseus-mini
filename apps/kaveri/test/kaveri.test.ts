@@ -8,7 +8,7 @@ import {
   normalizeAddress,
 } from "@theseus/pack-vendor-integrity";
 import { beforeEach, describe, expect, it } from "vitest";
-import { BIDDERS, buildServer, DOCUMENT_KEYS, getDocument, initialState, Kaveri, TODAY, TRAPS } from "../src/index.ts";
+import { BIDDERS, buildSites, DOCUMENT_KEYS, getDocument, initialState, Kaveri, TODAY, TRAPS } from "../src/index.ts";
 
 /* ------------------------------------------------------------------------
  * 1. The world is internally consistent and uses real-format identifiers.
@@ -183,9 +183,9 @@ describe("no accidental traps in the full world", () => {
     expect(bankChange.map((m) => m.id).sort()).toEqual(["msg_014", "msg_022"]);
   });
 
-  it("all other lists are 5x: debarment 10, guarantees 10 (one fake), tenders 5", () => {
+  it("all other lists are 5x: debarment 10, guarantees 11 (3 bidder EMDs incl. one fake + 8), tenders 5", () => {
     expect(s.debarment).toHaveLength(10);
-    expect(s.guarantees).toHaveLength(10);
+    expect(s.guarantees).toHaveLength(11);
     expect(s.guarantees.filter((g) => !g.genuine)).toHaveLength(1);
     expect(s.tenders).toHaveLength(5);
   });
@@ -196,12 +196,14 @@ describe("no accidental traps in the full world", () => {
  * --------------------------------------------------------------------- */
 describe("API behaviour", () => {
   let kaveri: Kaveri;
-  let app: ReturnType<typeof buildServer>;
+  let sites: ReturnType<typeof buildSites>;
   const agent = { "x-actor": "agent:emp_1" };
   beforeEach(() => {
     kaveri = new Kaveri();
-    app = buildServer(kaveri);
+    sites = buildSites(kaveri, { workspaceDir: false });
   });
+  const erp = () => sites.erp.app;
+  const bank = () => sites.bank.app;
 
   const newVendor = {
     legalName: BIDDERS.A.legalName,
@@ -216,52 +218,52 @@ describe("API behaviour", () => {
   };
 
   it("maker-checker: an agent can create a pending vendor but never activate it", async () => {
-    const created = await app.inject({ method: "POST", url: "/api/vendors", headers: agent, payload: newVendor });
+    const created = await erp().inject({ method: "POST", url: "/api/vendors", headers: agent, payload: newVendor });
     expect(created.statusCode).toBe(201);
     const id = created.json().id;
     expect(created.json().status).toBe("pending");
 
-    const selfApprove = await app.inject({ method: "POST", url: `/api/vendors/${id}/activate`, payload: { approvedBy: "agent:emp_1" } });
+    const selfApprove = await erp().inject({ method: "POST", url: `/api/vendors/${id}/activate`, payload: { approvedBy: "agent:emp_1" } });
     expect(selfApprove.statusCode).toBe(403);
     expect(selfApprove.json().error.code).toBe("APPROVAL_REQUIRED");
 
-    const ok = await app.inject({ method: "POST", url: `/api/vendors/${id}/activate`, payload: { approvedBy: "user:jyotiraditya" } });
+    const ok = await erp().inject({ method: "POST", url: `/api/vendors/${id}/activate`, payload: { approvedBy: "user:jyotiraditya" } });
     expect(ok.json().status).toBe("active");
   });
 
   it("rejects a duplicate GSTIN", async () => {
-    await app.inject({ method: "POST", url: "/api/vendors", headers: agent, payload: newVendor });
-    const dup = await app.inject({ method: "POST", url: "/api/vendors", headers: agent, payload: newVendor });
+    await erp().inject({ method: "POST", url: "/api/vendors", headers: agent, payload: newVendor });
+    const dup = await erp().inject({ method: "POST", url: "/api/vendors", headers: agent, payload: newVendor });
     expect(dup.statusCode).toBe(409);
   });
 
   it("bank change needs a human approver AND a call-back reference", async () => {
     const bank = { accountNumber: "50200031877265", ifsc: "HDFC0000532", holderName: "ARKA SOLAR SYSTEMS PRIVATE LIMITED" };
-    const noCallback = await app.inject({ method: "POST", url: "/api/vendors/V-112/bank", payload: { bank, approvedBy: "user:anil.shetty" } });
+    const noCallback = await erp().inject({ method: "POST", url: "/api/vendors/V-112/bank", payload: { bank, approvedBy: "user:anil.shetty" } });
     expect(noCallback.json().error.code).toBe("CALLBACK_REQUIRED");
-    const ok = await app.inject({ method: "POST", url: "/api/vendors/V-112/bank", payload: { bank, approvedBy: "user:anil.shetty", callbackRef: "CB-0001" } });
+    const ok = await erp().inject({ method: "POST", url: "/api/vendors/V-112/bank", payload: { bank, approvedBy: "user:anil.shetty", callbackRef: "CB-0001" } });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().bank.ifsc).toBe("HDFC0000532");
   });
 
   it("penny-drop returns the name at the bank (or a failure)", async () => {
-    const r = await app.inject({ method: "POST", url: "/api/bank/penny-drop", payload: { accountNumber: "7712049935", ifsc: "KKBK0000131" } });
+    const r = await bank().inject({ method: "POST", url: "/api/beneficiary/validate", payload: { accountNumber: "7712049935", ifsc: "KKBK0000131" } });
     expect(r.json().nameAtBank).toBe("SG CONSTRUCTION SERVICES");
-    const miss = await app.inject({ method: "POST", url: "/api/bank/penny-drop", payload: { accountNumber: "1", ifsc: "KKBK0000131" } });
+    const miss = await bank().inject({ method: "POST", url: "/api/beneficiary/validate", payload: { accountNumber: "1", ifsc: "KKBK0000131" } });
     expect(miss.json().ok).toBe(false);
   });
 
   it("the fake bank guarantee is not confirmed by the issuing bank", async () => {
-    const r = await app.inject({ method: "POST", url: "/api/bank/guarantees/verify", payload: { number: "PBG/SBI/2026/40917" } });
+    const r = await bank().inject({ method: "POST", url: "/api/guarantees/verify", payload: { number: "PBG/SBI/2026/40917" } });
     expect(r.json().confirmed).toBe(false);
   });
 
   it("payment lines: hold, correct (net recomputed), and release blocked while lines are pending", async () => {
     const base = "/api/payments/batches/PB-2026-W41";
-    await app.inject({ method: "POST", url: `${base}/lines/PL-03/hold`, headers: agent, payload: { reason: "Bank changed 3 days ago; call-back pending" } });
-    const fixed = await app.inject({ method: "POST", url: `${base}/lines/PL-05/correct`, headers: agent, payload: { tds: 1560, reason: "Individual: 1% under Sec. 393" } });
+    await erp().inject({ method: "POST", url: `${base}/lines/PL-03/hold`, headers: agent, payload: { reason: "Bank changed 3 days ago; call-back pending" } });
+    const fixed = await erp().inject({ method: "POST", url: `${base}/lines/PL-05/correct`, headers: agent, payload: { tds: 1560, reason: "Individual: 1% under Sec. 393" } });
     expect(fixed.json()).toMatchObject({ tds: 1560, net: 154_440, status: "corrected" });
-    const release = await app.inject({ method: "POST", url: `${base}/release`, payload: { approvedBy: "user:anil.shetty" } });
+    const release = await erp().inject({ method: "POST", url: `${base}/release`, payload: { approvedBy: "user:anil.shetty" } });
     expect(release.statusCode).toBe(409);
     expect(release.json().error.code).toBe("LINES_PENDING");
   });
@@ -269,10 +271,10 @@ describe("API behaviour", () => {
   it("fault injection: failNext fails exactly N times with a retryable 503", async () => {
     kaveri.setFaults({ failNext: { "payments.hold_line": 1 } });
     const url = "/api/payments/batches/PB-2026-W41/lines/PL-08/hold";
-    const first = await app.inject({ method: "POST", url, headers: agent, payload: { reason: "Duplicate of HSF/2026/0412" } });
+    const first = await erp().inject({ method: "POST", url, headers: agent, payload: { reason: "Duplicate of HSF/2026/0412" } });
     expect(first.statusCode).toBe(503);
     expect(first.json().error.code).toBe("TEMPORARILY_UNAVAILABLE");
-    const retry = await app.inject({ method: "POST", url, headers: agent, payload: { reason: "Duplicate of HSF/2026/0412" } });
+    const retry = await erp().inject({ method: "POST", url, headers: agent, payload: { reason: "Duplicate of HSF/2026/0412" } });
     expect(retry.json().status).toBe("held");
   });
 
@@ -288,18 +290,24 @@ describe("API behaviour", () => {
   });
 
   it("reset restores the seed world", async () => {
-    await app.inject({ method: "POST", url: "/api/vendors/V-104/hold", headers: agent, payload: { reason: "test" } });
+    await erp().inject({ method: "POST", url: "/api/vendors/V-104/hold", headers: agent, payload: { reason: "test" } });
     expect(kaveri.getVendor("V-104").paymentsOnHold).toBe(true);
-    await app.inject({ method: "POST", url: "/__admin/reset", payload: {} });
+    await sites.control.app.inject({ method: "POST", url: "/__admin/reset", payload: {} });
     expect(kaveri.getVendor("V-104").paymentsOnHold).toBe(false);
     expect(kaveri.state.auditLog).toHaveLength(0);
   });
 
-  it("HTML pages render (mail, vendor, batch, admin)", async () => {
-    for (const url of ["/mail", "/mail/msg_014", "/erp/vendors/V-101", "/erp/payments/PB-2026-W41", "/gst?gstin=29AAKFS4821M1ZM", "/bank", "/hr", "/admin"]) {
-      const r = await app.inject({ url });
-      expect(r.statusCode, url).toBe(200);
-      expect(r.headers["content-type"]).toMatch(/text\/html/);
+  it("every site renders its HTML pages", async () => {
+    const pages: Array<[keyof typeof sites, string]> = [
+      ["mail", "/"], ["mail", "/m/msg_014"], ["mail", "/compose"], ["erp", "/vendors"], ["erp", "/vendors/V-101"], ["erp", "/payments"],
+      ["erp", "/payments/PB-2026-W41"], ["erp", "/hr"], ["bank", "/"], ["bank", "/beneficiary?accountNumber=7712049935&ifsc=KKBK0000131"],
+      ["bank", "/guarantees?number=PBG/SBI/2026/40917"], ["bank", "/bulk"], ["gst", "/?gstin=29AAKFS4821M1ZM"], ["udyam", "/?number=UDYAM-KR-27-0001150"],
+      ["eproc", "/"], ["eproc", "/tenders/T-2026-14"], ["control", "/"], ["control", "/traps"], ["control", "/audit"],
+    ];
+    for (const [k, url] of pages) {
+      const r = await sites[k].app.inject({ url });
+      expect(r.statusCode, `${k} ${url}`).toBe(200);
+      expect(r.body, `${k} ${url}`).toContain(`data-site="${k}"`);
     }
   });
 });
