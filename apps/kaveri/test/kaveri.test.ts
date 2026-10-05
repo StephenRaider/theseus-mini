@@ -2,6 +2,7 @@ import {
   checkGstin,
   checkIfsc,
   contractorTds,
+  findDuplicates,
   msmeDeadline,
   nameSimilarity,
   normalizeAddress,
@@ -107,6 +108,86 @@ describe("traps are catchable", () => {
   it("lists 12 traps, each with a real-world source", () => {
     expect(TRAPS).toHaveLength(12);
     for (const t of TRAPS) expect(t.source.length).toBeGreaterThan(5);
+  });
+});
+
+/* ------------------------------------------------------------------------
+ * 2b. The 5x filler world contains NO accidental traps: running every
+ *     detector over everything finds exactly the planted cases.
+ * --------------------------------------------------------------------- */
+describe("no accidental traps in the full world", () => {
+  const s = initialState();
+  const batch = s.batches[0]!;
+  const vendor = (id: string) => s.vendors.find((v) => v.id === id)!;
+  const FY_START = "2026-04-01";
+
+  function lineFlags(l: (typeof batch.lines)[number]): string[] {
+    const v = vendor(l.vendorId);
+    const flags: string[] = [];
+    if (v.status !== "active") flags.push("inactive");
+    if (s.debarment.some((d) => (d.pan && d.pan === v.pan) || nameSimilarity(d.name, v.legalName) > 0.9)) flags.push("debarred");
+    if (l.payTo.accountNumber !== v.bank.accountNumber || l.payTo.ifsc !== v.bank.ifsc) flags.push("pays-other-account");
+    const recentBank = v.history.some((h) => h.field === "bank" && (Date.parse(s.today) - Date.parse(h.at)) / 86_400_000 < 30);
+    if (recentBank) flags.push("recent-bank-change");
+    const paid = s.paidBills.filter((p) => p.vendorId === v.id);
+    const dupInBatch = batch.lines.some((o) => o !== l && o.vendorId === l.vendorId && (o.billNumber === l.billNumber || o.gross === l.gross));
+    if (paid.some((p) => p.billNumber === l.billNumber || p.amount === l.gross) || dupInBatch) flags.push("duplicate");
+    const fy = paid.filter((p) => p.paidOn >= FY_START);
+    const earlier = fy.reduce((a, p) => a + p.amount, 0);
+    const untaxed = fy.filter((p) => p.amount <= 30_000).reduce((a, p) => a + p.amount, 0);
+    const tds = contractorTds({ pan: v.pan, amount: l.gross, paidEarlierThisYear: earlier, earlierPaidWithoutTds: untaxed });
+    if (tds.tds !== l.tds) flags.push(`tds ${l.tds}≠${tds.tds}`);
+    if (v.udyam) {
+      const m = msmeDeadline({ category: v.udyam.category, acceptedOn: l.acceptedOn, agreedDays: v.agreedCreditDays, today: s.today });
+      if (m.status === "due_soon" || m.status === "overdue") flags.push(`msme-${m.status}`);
+    }
+    return flags;
+  }
+
+  it("payment batch: only PL-02, PL-03, PL-05, PL-08, PL-10, PL-11 are flagged", () => {
+    const flagged = Object.fromEntries(batch.lines.map((l) => [l.id, lineFlags(l)]).filter(([, f]) => (f as string[]).length));
+    // Exact reasons: each trap line is flagged for its planted reason ONLY.
+    expect(flagged).toEqual({
+      "PL-02": ["msme-due_soon"],
+      "PL-03": ["recent-bank-change"],
+      "PL-05": ["tds 3120≠1560"],
+      "PL-08": ["duplicate"],
+      "PL-10": ["inactive"],
+      "PL-11": ["debarred"],
+    });
+    expect(batch.lines).toHaveLength(65);
+  });
+
+  it("vendor master: every GSTIN and IFSC is valid, and there are no duplicate vendors", () => {
+    expect(s.vendors).toHaveLength(60);
+    for (const v of s.vendors) {
+      if (v.gstin) expect(checkGstin(v.gstin, { pan: v.pan!, addressState: v.state }).issues, v.id).toEqual([]);
+      expect(checkIfsc(v.bank.ifsc).valid, `${v.id} ${v.bank.ifsc}`).toBe(true);
+      const others = s.vendors.filter((o) => o.id !== v.id).map((o) => ({ ...o, name: o.legalName, bankAccount: o.bank.accountNumber }));
+      expect(findDuplicates({ name: v.legalName, pan: v.pan, gstin: v.gstin, bankAccount: v.bank.accountNumber }, others), v.id).toEqual([]);
+    }
+  });
+
+  it("conflicts: only bidder C's address matches an employee; no shared bank accounts", () => {
+    const parties = [...s.vendors.map((v) => ({ who: v.id, address: v.address, account: v.bank.accountNumber })),
+      ...Object.entries(BIDDERS).map(([k, b]) => ({ who: `bidder ${k}`, address: b.address, account: b.bank.accountNumber }))];
+    const hits = parties.filter((p) =>
+      s.employees.some((e) => nameSimilarity(normalizeAddress(e.address), normalizeAddress(p.address)) > 0.85 || e.bankAccount === p.account));
+    expect(hits.map((h) => h.who)).toEqual(["bidder C"]);
+    expect(s.employees).toHaveLength(40);
+  });
+
+  it("mailbox: 50 emails; only the two planted ones ask for a bank change", () => {
+    expect(s.mail).toHaveLength(50);
+    const bankChange = s.mail.filter((m) => /bank (account|details)|ifsc/i.test(`${m.subject} ${m.body}`) && /change|update/i.test(`${m.subject} ${m.body}`));
+    expect(bankChange.map((m) => m.id).sort()).toEqual(["msg_014", "msg_022"]);
+  });
+
+  it("all other lists are 5x: debarment 10, guarantees 10 (one fake), tenders 5", () => {
+    expect(s.debarment).toHaveLength(10);
+    expect(s.guarantees).toHaveLength(10);
+    expect(s.guarantees.filter((g) => !g.genuine)).toHaveLength(1);
+    expect(s.tenders).toHaveLength(5);
   });
 });
 

@@ -12,12 +12,13 @@ coverage/
 # Obsidian workspace / settings
 .obsidian/
 
-# Working notes are PRIVATE by default: everything in docs/ is ignored
-# except the public design docs explicitly allow-listed below.
-docs/*
-!docs/Framework Spec.md
-!docs/Role Research.md
-!docs/Role Dossier - Vendor & Contractor Integrity.md
+# ---------------------------------------------------------------------------
+# PRIVATE: internal docs, notes, logs and agent hand-offs never go to GitHub.
+# The repo holds only what the apps need to build, run and be tested.
+# ---------------------------------------------------------------------------
+/docs/
+*.md
+!README.md
 
 # Agent handoff / ops logs (Claude <-> Gemini working files)
 HANDOFF.md
@@ -37,3 +38,9 @@ setup-repo.ps1
 
 # Local scratch space (Gemini/ops)
 scratch/
+
+# Files the Claude desktop app saves from the chat (private working notes)
+Claude outputs/
+
+# Generated working files (agent workspace, exports, reports)
+workspace/

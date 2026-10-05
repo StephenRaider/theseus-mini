@@ -4,7 +4,7 @@ A harness for **AI employees** that take a goal, plan, use real tools, recover f
 
 The first employee is a **Vendor & Contractor Integrity Specialist** at *Kaveri Infra Pvt Ltd* (fictional). Its job is to make sure the company only pays the right party, the right amount, into the right account.
 
-> Status: **M2, the world.** Contracts, role pack, deterministic checks and the mock company *Kaveri Infra* (mail, ERP, bank, GST portal) with 12 planted real-world traps. Next: the three-column UI. Public design docs: [Framework Spec](docs/Framework%20Spec.md), [Role Research](docs/Role%20Research.md), [Role Dossier](docs/Role%20Dossier%20-%20Vendor%20%26%20Contractor%20Integrity.md).
+> Status: **M2, the world.** Contracts, role pack, deterministic checks and the mock company *Kaveri Infra* (mail, ERP, bank, GST portal) with 12 planted real-world traps. Next: the three-column UI.
 
 ## Quick start
 
@@ -26,7 +26,7 @@ Copy `.env.example` to `.env` and add a model key when the agent loop lands.
 ## How this repo is worked on
 
 - **Claude** (cloud) writes the code, tests and docs, and runs the full check before delivering.
-- **Antigravity** (local) handles installs, commits and pushes, following a private handoff note.
+- **Antigravity** (local) handles installs, commits and pushes.
 - **GitHub Actions** re-runs `pnpm check` on every push (`.github/workflows/ci.yml`).
 
 ## Layout

@@ -1,4 +1,5 @@
 import type { Email, KaveriState, PaymentLine, Vendor } from "../domain.ts";
+import { fillerDebarment, fillerEmployees, fillerGuarantees, fillerLines, fillerMail, fillerTenders, fillerVendors } from "./filler.ts";
 import { gstin } from "./ids.ts";
 
 /**
@@ -38,7 +39,7 @@ const SG_NEW_BANK = { accountNumber: "7712049935", ifsc: "KKBK0000131", holderNa
 const ARKA_OLD_BANK = { accountNumber: "50200031877265", ifsc: "HDFC0000001", holderName: "ARKA SOLAR SYSTEMS PRIVATE LIMITED" };
 const ARKA_NEW_BANK = { accountNumber: "50200031877265", ifsc: "HDFC0000532", holderName: "ARKA SOLAR SYSTEMS PRIVATE LIMITED" };
 
-export const VENDORS: Vendor[] = [
+const CORE_VENDORS: Vendor[] = [
   vendor({
     id: "V-101",
     legalName: "Shree Ganesh Constructions",
@@ -74,6 +75,7 @@ export const VENDORS: Vendor[] = [
     phone: "+91 98450 22871",
     bank: { accountNumber: "10293847561", ifsc: "SBIN0000813", holderName: "MAHESH KUMAR" },
     udyam: { number: "UDYAM-KR-03-0019920", category: "micro" },
+    agreedCreditDays: 45, // keeps PL-05 a pure TDS case (no MSME deadline overlap)
   }),
   vendor({
     id: "V-103",
@@ -197,9 +199,13 @@ export const VENDORS: Vendor[] = [
   }),
 ];
 
+/** Everyday vendors around the planted cases (5x the core list). */
+export const FILLER_VENDORS = fillerVendors(113, 48);
+export const VENDORS: Vendor[] = [...CORE_VENDORS, ...FILLER_VENDORS];
+
 /* --------------------------------------------------------------- employees */
 
-export const EMPLOYEES = [
+const CORE_EMPLOYEES = [
   { id: "E-01", name: "Anil Shetty", department: "Finance (Head)", address: "22, 8th Cross, Malleshwaram, Bengaluru 560003", bankAccount: "00011209988" },
   { id: "E-02", name: "Meera Iyer", department: "Accounts Payable", address: "5, Temple Street, Basavanagudi, Bengaluru 560004", bankAccount: "00011209991" },
   { id: "E-03", name: "Ravi Gowda", department: "Accounts (Clerk)", address: "301, Sunrise Apartments, Yelahanka, Bengaluru 560064", bankAccount: "00011209994" },
@@ -211,10 +217,14 @@ export const EMPLOYEES = [
   { id: "E-08", name: "Divya Menon", department: "Legal", address: "9, Lavelle Road, Bengaluru 560001", bankAccount: "00011210013" },
 ];
 
-export const DEBARMENT = [
+export const EMPLOYEES = [...CORE_EMPLOYEES, ...fillerEmployees(9, 32)];
+
+const CORE_DEBARMENT = [
   { name: "Deccan Quarry Works", pan: "AAFFD8812H", reason: "Debarred by PWD Karnataka for substandard material (Order PWD/DEB/2026/07)", until: "2027-06-30" },
   { name: "Gokarna Infra Projects", pan: "AAHFG1290M", reason: "Forged experience certificate in tender T-2025-31", until: "2028-03-31" },
 ];
+
+export const DEBARMENT = [...CORE_DEBARMENT, ...fillerDebarment()];
 
 /* ----------------------------------------------- tender T-2026-14 bidders */
 
@@ -284,12 +294,14 @@ export const BANK_REGISTRY: Record<string, string> = Object.fromEntries([
   ...Object.values(BIDDERS).map((b) => [key(b.bank), b.bank.holderName]),
 ]);
 
-export const GUARANTEES = [
+const CORE_GUARANTEES = [
   { number: "PBG/HDFC/2026/88123", issuingBank: "HDFC Bank, Bidadi", amount: 1_250_000, validUntil: "2027-10-31", genuine: true },
   { number: "PBG/SBI/2026/40917", issuingBank: "State Bank of India, Mysuru", amount: 980_000, validUntil: "2027-09-30", genuine: false }, // TRAP T-FAKE-BG
 ];
 
-export const TENDERS = [
+export const GUARANTEES = [...CORE_GUARANTEES, ...fillerGuarantees()];
+
+const CORE_TENDERS = [
   {
     id: "T-2026-14",
     title: "Resurfacing of NH-948 service road, Ramanagara (Package 2)",
@@ -297,6 +309,8 @@ export const TENDERS = [
     status: "evaluation" as const,
   },
 ];
+
+export const TENDERS = [...CORE_TENDERS, ...fillerTenders(FILLER_VENDORS)];
 
 /* --------------------------------------------------------- payment batch */
 
@@ -329,6 +343,8 @@ function line(
   };
 }
 
+const FILLER_PAYMENTS = fillerLines(FILLER_VENDORS, 14, 52, TODAY);
+
 export const BATCH = {
   id: "PB-2026-W41",
   title: "Friday contractor payments: week 41",
@@ -348,6 +364,7 @@ export const BATCH = {
     line("PL-11", "V-110", "DQW/26/051", 375_000, 0.02, "2026-09-21", "Aggregate supply & spreading (RA-5)"), // debarred (T-DEBARRED)
     line("PL-12", "V-112", "ASS/2026/2203", 210_000, 0.02, "2026-09-30", "Solar street-light installation (RA-1)"),
     line("PL-13", "V-111", "VI/2026/11", 28_000, 0, "2026-10-01", "Site office partitioning"), // correctly no TDS (≤30k, FY total ≤1L)
+    ...FILLER_PAYMENTS.lines, // PL-14 … PL-65: ordinary, correct lines
   ],
 };
 
@@ -357,6 +374,7 @@ export const PAID_BILLS = [
   { vendorId: "V-101", billNumber: "SGC/RA/2026/06", amount: 790_000, paidOn: "2026-09-04" },
   { vendorId: "V-111", billNumber: "VI/2026/07", amount: 35_000, paidOn: "2026-06-12" }, // > Rs. 30,000, so TDS was deducted on it
   { vendorId: "V-111", billNumber: "VI/2026/09", amount: 25_000, paidOn: "2026-08-02" },
+  ...FILLER_PAYMENTS.paid,
 ];
 
 /* --------------------------------------------------------------- mailbox */
@@ -366,7 +384,7 @@ function mail(e: Omit<Email, "folder" | "to" | "read"> & Partial<Email>): Email 
   return { folder: "inbox", to: me, read: false, ...e };
 }
 
-export const MAIL: Email[] = [
+const CORE_MAIL: Email[] = [
   mail({
     id: "msg_001",
     from: `kavya.rao@${COMPANY.domain}`,
@@ -473,7 +491,7 @@ export const MAIL: Email[] = [
     subject: "PB-2026-W41 ready: integrity check before Friday release",
     receivedAt: ts("2026-10-06", "17:55"),
     body:
-      "Team,\n\nPayment batch PB-2026-W41 (13 lines) is drafted for Friday. Please run the usual integrity checks " +
+      "Team,\n\nPayment batch PB-2026-W41 (65 lines) is drafted for Friday. Please run the usual integrity checks " +
       "(vendor status, bank details, duplicates, TDS, MSME dates) and hold anything doubtful. I will release after your sign-off.\n\nAnil",
     attachments: [],
   }),
@@ -500,6 +518,9 @@ export const MAIL: Email[] = [
     attachments: [{ name: "HDFC_IFSC_change_letter.pdf", mime: "application/pdf", docKey: "bankchange:ARKA" }],
   }),
 ];
+
+/** Core mail + ~40 everyday emails (internal memos, newsletters, routine vendor mail, spam). */
+export const MAIL: Email[] = [...CORE_MAIL, ...fillerMail(FILLER_VENDORS, TODAY, COMPANY.domain)];
 
 /* ------------------------------------------------------------------ traps */
 
