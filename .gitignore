@@ -12,10 +12,17 @@ coverage/
 # Obsidian workspace / settings
 .obsidian/
 
-# Private notes (kept locally in the vault, not published)
-docs/Build Log*.md
-docs/Setup - API Keys & Credits (India).md
-docs/Field Interview Guide.md
+# Working notes are PRIVATE by default: everything in docs/ is ignored
+# except the public design docs explicitly allow-listed below.
+docs/*
+!docs/Framework Spec.md
+!docs/Role Research.md
+!docs/Role Dossier - Vendor & Contractor Integrity.md
+
+# Agent handoff / ops logs (Claude <-> Gemini working files)
+HANDOFF.md
+GEMINI_HANDOFF.md
+*HANDOFF*.md
 
 # OS / editor noise
 Thumbs.db

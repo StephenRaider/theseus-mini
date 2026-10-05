@@ -4,7 +4,7 @@ A harness for **AI employees** that take a goal, plan, use real tools, recover f
 
 The first employee is a **Vendor & Contractor Integrity Specialist** at *Kaveri Infra Pvt Ltd* (fictional). Its job is to make sure the company only pays the right party, the right amount, into the right account.
 
-> Status: **M1, foundations.** Contracts, role pack and deterministic checks are in; the agent loop arrives in M3. Design notes (research, role dossier, framework spec, plan) are in [`docs/`](docs/), which is also an Obsidian vault.
+> Status: **M1, foundations.** Contracts, role pack and deterministic checks are in; the agent loop arrives in M3. Public design docs: [Framework Spec](docs/Framework%20Spec.md), [Role Research](docs/Role%20Research.md), [Role Dossier](docs/Role%20Dossier%20-%20Vendor%20%26%20Contractor%20Integrity.md).
 
 ## Quick start
 
@@ -20,7 +20,7 @@ Copy `.env.example` to `.env` and add a model key when the agent loop lands (M3)
 ## How this repo is worked on
 
 - **Claude** (cloud) writes the code, tests and docs, and runs the full check before delivering.
-- **Antigravity** (local) handles installs, commits and pushes, following [`HANDOFF.md`](HANDOFF.md).
+- **Antigravity** (local) handles installs, commits and pushes, following a private handoff note.
 - **GitHub Actions** re-runs `pnpm check` on every push (`.github/workflows/ci.yml`).
 
 ## Layout
