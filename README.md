@@ -4,7 +4,7 @@ A harness for **AI employees** that take a goal, plan, use real tools, recover f
 
 The first employee is a **Vendor & Contractor Integrity Specialist** at *Kaveri Infra Pvt Ltd* (fictional). Its job is to make sure the company only pays the right party, the right amount, into the right account.
 
-> Status: **M1, foundations.** Contracts, role pack and deterministic checks are in; the agent loop arrives in M3. Public design docs: [Framework Spec](docs/Framework%20Spec.md), [Role Research](docs/Role%20Research.md), [Role Dossier](docs/Role%20Dossier%20-%20Vendor%20%26%20Contractor%20Integrity.md).
+> Status: **M2, the world.** Contracts, role pack, deterministic checks and the mock company *Kaveri Infra* (mail, ERP, bank, GST portal) with 12 planted real-world traps. Next: the three-column UI. Public design docs: [Framework Spec](docs/Framework%20Spec.md), [Role Research](docs/Role%20Research.md), [Role Dossier](docs/Role%20Dossier%20-%20Vendor%20%26%20Contractor%20Integrity.md).
 
 ## Quick start
 
@@ -15,7 +15,13 @@ pnpm install
 pnpm check        # typecheck every package + run all tests
 ```
 
-Copy `.env.example` to `.env` and add a model key when the agent loop lands (M3).
+Run the mock company and open it in a browser:
+
+```bash
+pnpm kaveri       # → http://localhost:4100  (Mail · Vendors · Payments · GST Portal · Bank · HR · Admin)
+```
+
+Copy `.env.example` to `.env` and add a model key when the agent loop lands.
 
 ## How this repo is worked on
 
@@ -31,7 +37,7 @@ Copy `.env.example` to `.env` and add a model key when the agent loop lands (M3)
 | `packages/core` | The **keel**: agent loop, tool router, permission gate, retries, verifier, event log. M1 has role-pack loading with guard rails | 🟡 |
 | `packages/browser` | Playwright wrapper | ⏳ |
 | `packs/vendor-integrity` | Role pack: `pack.yaml`, 3 playbooks, and deterministic validators (GSTIN, PAN, IFSC, TDS Sec. 393, MSME 43B(h), duplicate matching) | ✅ M1 |
-| `apps/kaveri` | Mock company: mail, ERP, bank portal, gov lookup, with seed data, faults and ground truth | ⏳ M2 |
+| `apps/kaveri` | Mock company *Kaveri Infra Pvt Ltd*: mail with real PDF attachments, ERP (vendor master with maker-checker, payment batches), bank (penny-drop, guarantee confirmation), GST portal, HR and debarment lists. Seeded scenario with 12 traps, fault injection, ground truth at `/__admin` | ✅ M2 |
 | `apps/server` | Runs employees, stores events, WebSocket API | ⏳ |
 | `apps/web` | Three-column UI | ⏳ |
 | `evals` | Task suite + pass^k reports | ⏳ |

@@ -11,10 +11,13 @@
     "typecheck": "pnpm -r --parallel typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "pnpm typecheck && pnpm test",
+    "kaveri": "pnpm --filter @theseus/kaveri dev"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

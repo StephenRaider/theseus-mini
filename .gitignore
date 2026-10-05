@@ -34,3 +34,6 @@ desktop.ini
 
 # One-time local setup script
 setup-repo.ps1
+
+# Local scratch space (Gemini/ops)
+scratch/

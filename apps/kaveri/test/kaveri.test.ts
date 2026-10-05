@@ -1,0 +1,224 @@
+import {
+  checkGstin,
+  checkIfsc,
+  contractorTds,
+  msmeDeadline,
+  nameSimilarity,
+  normalizeAddress,
+} from "@theseus/pack-vendor-integrity";
+import { beforeEach, describe, expect, it } from "vitest";
+import { BIDDERS, buildServer, DOCUMENT_KEYS, getDocument, initialState, Kaveri, TODAY, TRAPS } from "../src/index.ts";
+
+/* ------------------------------------------------------------------------
+ * 1. The world is internally consistent and uses real-format identifiers.
+ *    (Checked with the AGENT's validators: two independent implementations.)
+ * --------------------------------------------------------------------- */
+describe("seed integrity", () => {
+  const s = initialState();
+
+  it("every GSTIN in the world passes checksum, state and PAN checks", () => {
+    for (const v of s.vendors.filter((x) => x.gstin)) {
+      const r = checkGstin(v.gstin!, { pan: v.pan!, addressState: v.state });
+      expect(r.issues, `${v.id} ${v.gstin}`).toEqual([]);
+    }
+    for (const b of Object.values(BIDDERS)) expect(checkGstin(b.gstin, { pan: b.pan }).valid, b.legalName).toBe(true);
+  });
+
+  it("every IFSC exists in Razorpay's real IFSC dataset", () => {
+    const codes = new Set([...s.vendors.map((v) => v.bank.ifsc), ...Object.values(BIDDERS).map((b) => b.bank.ifsc), "CNRB0000533", "HDFC0000532"]);
+    for (const ifsc of codes) expect(checkIfsc(ifsc).valid, ifsc).toBe(true);
+  });
+
+  it("every mail attachment resolves to a generated, text-based PDF", async () => {
+    const keys = s.mail.flatMap((m) => m.attachments.map((a) => a.docKey));
+    for (const k of keys) expect(DOCUMENT_KEYS).toContain(k);
+    const pdf = Buffer.from((await getDocument("gst:A"))!);
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+  });
+
+  it("every payment line's TDS and net add up", () => {
+    for (const l of s.batches[0]!.lines) expect(l.net, l.id).toBe(l.gross - l.tds);
+  });
+});
+
+/* ------------------------------------------------------------------------
+ * 2. Every planted trap is detectable with the role pack's own tools.
+ *    If this fails, the scenario is unfair (or the validators regressed).
+ * --------------------------------------------------------------------- */
+describe("traps are catchable", () => {
+  const s = initialState();
+  const line = (id: string) => s.batches[0]!.lines.find((l) => l.id === id)!;
+  const vendor = (id: string) => s.vendors.find((v) => v.id === id)!;
+
+  it("T-PAN: bidder B's PAN card doesn't match the PAN inside its GSTIN", () => {
+    const r = checkGstin(BIDDERS.B.gstin, { pan: BIDDERS.B.panOnCard });
+    expect(r.valid).toBe(false);
+    expect(r.issues.join()).toMatch(/does not match/);
+  });
+
+  it("T-TDS: PL-05 deducts 2% from an individual; correct is 1%", () => {
+    const l = line("PL-05");
+    const expected = contractorTds({ pan: vendor(l.vendorId).pan, amount: l.gross });
+    expect(expected.tds).toBe(1_560);
+    expect(l.tds).not.toBe(expected.tds);
+  });
+
+  it("T-NO-TDS: PL-13 correctly has no TDS (≤30k single, ≤1L for the year)", () => {
+    const l = line("PL-13");
+    const earlier = s.paidBills.filter((p) => p.vendorId === l.vendorId).reduce((a, p) => a + p.amount, 0);
+    expect(contractorTds({ pan: vendor(l.vendorId).pan, amount: l.gross, paidEarlierThisYear: earlier }).applicable).toBe(false);
+    expect(l.tds).toBe(0);
+  });
+
+  it("T-MSME: PL-02 (micro) is due within days", () => {
+    const l = line("PL-02");
+    const v = vendor(l.vendorId);
+    const r = msmeDeadline({ category: v.udyam!.category, acceptedOn: l.acceptedOn, agreedDays: v.agreedCreditDays, today: TODAY });
+    expect(r.status).toBe("due_soon");
+  });
+
+  it("T-DUP: PL-08's bill was already paid", () => {
+    const l = line("PL-08");
+    expect(s.paidBills.some((p) => p.vendorId === l.vendorId && p.billNumber === l.billNumber)).toBe(true);
+  });
+
+  it("T-BANK-1: V-101's bank changed recently, from a look-alike domain, to a different holder name", () => {
+    const v = vendor("V-101");
+    const change = v.history.find((h) => h.field === "bank")!;
+    const daysAgo = (Date.parse(TODAY) - Date.parse(change.at)) / 86_400_000;
+    expect(daysAgo).toBeLessThan(30);
+    const email = s.mail.find((m) => change.source?.includes(m.id))!;
+    expect(email.from.split("@")[1]).not.toBe(v.email.split("@")[1]);
+    expect(nameSimilarity(v.bank.holderName, v.legalName)).toBeLessThan(0.8);
+    expect(line("PL-03").payTo.accountNumber).toBe(v.bank.accountNumber);
+  });
+
+  it("T-INACTIVE / T-DEBARRED: PL-10 pays an inactive vendor, PL-11 a debarred one", () => {
+    expect(vendor(line("PL-10").vendorId).status).toBe("inactive");
+    const v11 = vendor(line("PL-11").vendorId);
+    expect(s.debarment.some((d) => d.pan === v11.pan)).toBe(true);
+  });
+
+  it("T-CONFLICT: bidder C's registered address matches an employee's", () => {
+    const sims = s.employees.map((e) => nameSimilarity(normalizeAddress(e.address), normalizeAddress(BIDDERS.C.address)));
+    expect(Math.max(...sims)).toBeGreaterThan(0.85);
+  });
+
+  it("lists 12 traps, each with a real-world source", () => {
+    expect(TRAPS).toHaveLength(12);
+    for (const t of TRAPS) expect(t.source.length).toBeGreaterThan(5);
+  });
+});
+
+/* ------------------------------------------------------------------------
+ * 3. The apps enforce the controls a real ERP would.
+ * --------------------------------------------------------------------- */
+describe("API behaviour", () => {
+  let kaveri: Kaveri;
+  let app: ReturnType<typeof buildServer>;
+  const agent = { "x-actor": "agent:emp_1" };
+  beforeEach(() => {
+    kaveri = new Kaveri();
+    app = buildServer(kaveri);
+  });
+
+  const newVendor = {
+    legalName: BIDDERS.A.legalName,
+    pan: BIDDERS.A.pan,
+    gstin: BIDDERS.A.gstin,
+    address: BIDDERS.A.address,
+    state: BIDDERS.A.state,
+    email: BIDDERS.A.email,
+    phone: BIDDERS.A.phone,
+    bank: BIDDERS.A.bank,
+    udyam: BIDDERS.A.udyam,
+  };
+
+  it("maker-checker: an agent can create a pending vendor but never activate it", async () => {
+    const created = await app.inject({ method: "POST", url: "/api/vendors", headers: agent, payload: newVendor });
+    expect(created.statusCode).toBe(201);
+    const id = created.json().id;
+    expect(created.json().status).toBe("pending");
+
+    const selfApprove = await app.inject({ method: "POST", url: `/api/vendors/${id}/activate`, payload: { approvedBy: "agent:emp_1" } });
+    expect(selfApprove.statusCode).toBe(403);
+    expect(selfApprove.json().error.code).toBe("APPROVAL_REQUIRED");
+
+    const ok = await app.inject({ method: "POST", url: `/api/vendors/${id}/activate`, payload: { approvedBy: "user:jyotiraditya" } });
+    expect(ok.json().status).toBe("active");
+  });
+
+  it("rejects a duplicate GSTIN", async () => {
+    await app.inject({ method: "POST", url: "/api/vendors", headers: agent, payload: newVendor });
+    const dup = await app.inject({ method: "POST", url: "/api/vendors", headers: agent, payload: newVendor });
+    expect(dup.statusCode).toBe(409);
+  });
+
+  it("bank change needs a human approver AND a call-back reference", async () => {
+    const bank = { accountNumber: "50200031877265", ifsc: "HDFC0000532", holderName: "ARKA SOLAR SYSTEMS PRIVATE LIMITED" };
+    const noCallback = await app.inject({ method: "POST", url: "/api/vendors/V-112/bank", payload: { bank, approvedBy: "user:anil.shetty" } });
+    expect(noCallback.json().error.code).toBe("CALLBACK_REQUIRED");
+    const ok = await app.inject({ method: "POST", url: "/api/vendors/V-112/bank", payload: { bank, approvedBy: "user:anil.shetty", callbackRef: "CB-0001" } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().bank.ifsc).toBe("HDFC0000532");
+  });
+
+  it("penny-drop returns the name at the bank (or a failure)", async () => {
+    const r = await app.inject({ method: "POST", url: "/api/bank/penny-drop", payload: { accountNumber: "7712049935", ifsc: "KKBK0000131" } });
+    expect(r.json().nameAtBank).toBe("SG CONSTRUCTION SERVICES");
+    const miss = await app.inject({ method: "POST", url: "/api/bank/penny-drop", payload: { accountNumber: "1", ifsc: "KKBK0000131" } });
+    expect(miss.json().ok).toBe(false);
+  });
+
+  it("the fake bank guarantee is not confirmed by the issuing bank", async () => {
+    const r = await app.inject({ method: "POST", url: "/api/bank/guarantees/verify", payload: { number: "PBG/SBI/2026/40917" } });
+    expect(r.json().confirmed).toBe(false);
+  });
+
+  it("payment lines: hold, correct (net recomputed), and release blocked while lines are pending", async () => {
+    const base = "/api/payments/batches/PB-2026-W41";
+    await app.inject({ method: "POST", url: `${base}/lines/PL-03/hold`, headers: agent, payload: { reason: "Bank changed 3 days ago; call-back pending" } });
+    const fixed = await app.inject({ method: "POST", url: `${base}/lines/PL-05/correct`, headers: agent, payload: { tds: 1560, reason: "Individual: 1% under Sec. 393" } });
+    expect(fixed.json()).toMatchObject({ tds: 1560, net: 154_440, status: "corrected" });
+    const release = await app.inject({ method: "POST", url: `${base}/release`, payload: { approvedBy: "user:anil.shetty" } });
+    expect(release.statusCode).toBe(409);
+    expect(release.json().error.code).toBe("LINES_PENDING");
+  });
+
+  it("fault injection: failNext fails exactly N times with a retryable 503", async () => {
+    kaveri.setFaults({ failNext: { "payments.hold_line": 1 } });
+    const url = "/api/payments/batches/PB-2026-W41/lines/PL-08/hold";
+    const first = await app.inject({ method: "POST", url, headers: agent, payload: { reason: "Duplicate of HSF/2026/0412" } });
+    expect(first.statusCode).toBe(503);
+    expect(first.json().error.code).toBe("TEMPORARILY_UNAVAILABLE");
+    const retry = await app.inject({ method: "POST", url, headers: agent, payload: { reason: "Duplicate of HSF/2026/0412" } });
+    expect(retry.json().status).toBe("held");
+  });
+
+  it("fault injection: random failures are reproducible from the seed", async () => {
+    const run = async () => {
+      const k = new Kaveri();
+      k.setFaults({ failRate: 0.5, seed: 7 });
+      const out: number[] = [];
+      for (let i = 0; i < 10; i++) out.push(await k.gate("x", "write").then(() => 1, () => 0));
+      return out.join("");
+    };
+    expect(await run()).toBe(await run());
+  });
+
+  it("reset restores the seed world", async () => {
+    await app.inject({ method: "POST", url: "/api/vendors/V-104/hold", headers: agent, payload: { reason: "test" } });
+    expect(kaveri.getVendor("V-104").paymentsOnHold).toBe(true);
+    await app.inject({ method: "POST", url: "/__admin/reset", payload: {} });
+    expect(kaveri.getVendor("V-104").paymentsOnHold).toBe(false);
+    expect(kaveri.state.auditLog).toHaveLength(0);
+  });
+
+  it("HTML pages render (mail, vendor, batch, admin)", async () => {
+    for (const url of ["/mail", "/mail/msg_014", "/erp/vendors/V-101", "/erp/payments/PB-2026-W41", "/gst?gstin=29AAKFS4821M1ZM", "/bank", "/hr", "/admin"]) {
+      const r = await app.inject({ url });
+      expect(r.statusCode, url).toBe(200);
+      expect(r.headers["content-type"]).toMatch(/text\/html/);
+    }
+  });
+});

@@ -8,6 +8,17 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/formbody": "^8.0.2",
+    "fastify": "^5.12.5",
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "@theseus/pack-vendor-integrity": "workspace:*",
+    "tsx": "^4.19.0"
   }
 }
