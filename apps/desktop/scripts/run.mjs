@@ -8,6 +8,9 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
+// Static import (vite is a devDependency of this package). A dynamic import of a
+// resolved Windows path like "D:\\..." fails on Windows: ESM needs file:// URLs.
+import { build as viteBuild, createServer } from "vite";
 
 const mode = process.argv[2] ?? "dev";
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -41,11 +44,10 @@ function electron(env = {}) {
   return child;
 }
 
-const vite = await import(require.resolve("vite", { paths: [web] }));
 await bundle();
 
 if (mode === "dev") {
-  const server = await vite.createServer({ root: web, configFile: path.join(web, "vite.config.ts") });
+  const server = await createServer({ root: web, configFile: path.join(web, "vite.config.ts") });
   await server.listen();
   const url = server.resolvedUrls?.local?.[0] ?? "http://localhost:5173/";
   console.log(`[theseus] UI dev server ${url}`);
@@ -57,7 +59,7 @@ if (mode === "dev") {
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 } else {
-  await vite.build({ root: web, configFile: path.join(web, "vite.config.ts"), logLevel: "warn" });
+  await viteBuild({ root: web, configFile: path.join(web, "vite.config.ts"), logLevel: "warn" });
   if (mode === "prod") electron();
   else console.log("[theseus] built apps/desktop/dist and apps/web/dist");
 }
