@@ -48,3 +48,6 @@ workspace/
 # Backups (e.g. before history rewrites) must never be committed
 *.bundle
 *backup*/
+
+# Local model usage counter and response cache (pnpm agent)
+.theseus/

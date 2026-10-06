@@ -16,7 +16,8 @@
     "world:reset": "pnpm --filter @theseus/kaveri world:reset",
     "app": "pnpm --filter @theseus/desktop dev",
     "app:prod": "pnpm --filter @theseus/desktop start",
-    "web": "pnpm --filter @theseus/web dev"
+    "web": "pnpm --filter @theseus/web dev",
+    "agent": "tsx apps/server/src/agent.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

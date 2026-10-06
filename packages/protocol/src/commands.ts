@@ -44,6 +44,8 @@ export const Command = z.discriminatedUnion("type", [
     rolePack: z.string(),
     scope: z.string().optional(),
   }),
+  /** Answer a question an employee asked mid-work (Framework Spec §11). */
+  z.object({ type: z.literal("answer_question"), questionId: Id, answer: z.string().min(1) }),
   z.object({ type: z.literal("rename_employee"), employeeId: Id, name: z.string().min(1) }),
   z.object({
     type: z.literal("resolve_plank_proposal"),

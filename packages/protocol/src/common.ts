@@ -11,6 +11,8 @@ export type Id = z.infer<typeof Id>;
 /** Who did something. Every event and plan edit carries one. */
 export const Actor = z.union([
   z.literal("user"),
+  /** A named human, e.g. "user:you" (the approver identity sent to the company's systems). */
+  z.templateLiteral(["user:", z.string()]),
   z.literal("theseus"),
   z.literal("system"),
   z.templateLiteral(["employee:", z.string()]),

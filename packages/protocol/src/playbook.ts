@@ -24,6 +24,11 @@ export const PlaybookStep = z.object({
   on_fail: OnFail.default("needs_you"),
   /** Highest risk tier this step may use; irreversible always needs approval. */
   risk: RiskTier.default("read"),
+  /**
+   * Steps whose results this step relies on. When a user asks for only part
+   * of a playbook (task tier 2), the planner adds these automatically.
+   */
+  needs: z.array(z.string()).default([]),
 });
 export type PlaybookStep = z.infer<typeof PlaybookStep>;
 
@@ -60,5 +65,12 @@ export const RolePackManifest = z.object({
   grounding: z.array(z.string()).default([]),
   tools: z.array(z.object({ name: z.string(), risk: RiskTier, description: z.string() })).min(1),
   checks: z.array(z.object({ id: z.string(), kind: z.enum(["deterministic", "judged"]), description: z.string() })),
+  /**
+   * Scope charter (Framework Spec §10): what this role does and explicitly
+   * does not do. Requests outside it are politely refused.
+   */
+  scope: z
+    .object({ does: z.array(z.string()).default([]), does_not: z.array(z.string()).default([]) })
+    .default({ does: [], does_not: [] }),
 });
 export type RolePackManifest = z.infer<typeof RolePackManifest>;

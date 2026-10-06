@@ -5,7 +5,8 @@
   "description": "Role pack: Vendor & Contractor Integrity Specialist (playbooks, tools, checks).",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
@@ -14,9 +15,7 @@
     "@theseus/protocol": "workspace:*",
     "ifsc": "2.0.50",
     "yaml": "^2.6.0",
-    "zod": "^4.1.0"
-  },
-  "devDependencies": {
+    "zod": "^4.1.0",
     "@theseus/core": "workspace:*"
   }
 }

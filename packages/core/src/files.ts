@@ -158,6 +158,22 @@ export class FileSandbox {
     return fs.readFile(abs, "utf8");
   }
 
+  /** Raw bytes of a file (PDFs, spreadsheets). */
+  async readBytes(rootId: string, rel: string, maxBytes = 20 * 1024 * 1024): Promise<Buffer> {
+    const abs = await this.resolve(rootId, rel);
+    const st = await fs.stat(abs).catch(() => null);
+    if (!st?.isFile()) throw new SandboxError("not_found", `File not found: ${rel}`);
+    if (st.size > maxBytes) throw new SandboxError("too_large", `File is larger than ${maxBytes} bytes`);
+    return fs.readFile(abs);
+  }
+
+  /** Size of an existing file, or undefined. */
+  async sizeOf(rootId: string, rel: string): Promise<number | undefined> {
+    const abs = await this.resolve(rootId, rel);
+    const st = await fs.stat(abs).catch(() => null);
+    return st?.isFile() ? st.size : undefined;
+  }
+
   /** A name that doesn't exist yet: "report.docx" → "report (1).docx". */
   async freeName(rootId: string, rel: string): Promise<string> {
     const clean = cleanRel(rel);

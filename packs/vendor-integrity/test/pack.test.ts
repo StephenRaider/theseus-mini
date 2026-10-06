@@ -16,7 +16,7 @@ describe("vendor-integrity role pack", () => {
     pb.steps[1]!.tools.push("shell.exec"); // not part of this role at all
     const problems = validatePlaybookAgainstManifest(pb, manifest);
     expect(problems).toEqual([
-      'step "vendor" (risk read) uses irreversible tool "payments.release_batch"',
+      'step "vendor" (risk write) uses irreversible tool "payments.release_batch"',
       'step "bank" uses undeclared tool "shell.exec"',
     ]);
   });

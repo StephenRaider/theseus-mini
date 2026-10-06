@@ -31,6 +31,10 @@ export const Task = z.object({
   successCriteria: z.array(SuccessCriterion).default([]),
   playbookId: z.string().optional(),
   playbookVersion: z.number().int().optional(),
+  /** 1 = full playbook · 2 = part of a playbook · 3 = adjacent task with a composed plan (Framework Spec §10). */
+  tier: z.number().int().min(1).max(3).optional(),
+  /** What the agent decided without being told (shown so the user can correct it). */
+  assumptions: z.array(z.string()).optional(),
   /** If Theseus delegated this, the parent task. */
   parentTaskId: Id.optional(),
   status: TaskStatus,

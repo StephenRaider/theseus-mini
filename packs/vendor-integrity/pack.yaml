@@ -19,6 +19,13 @@ tools:
   - { name: mail.draft_reply, risk: write, description: "Save a draft reply (not sent)" }
   - { name: mail.send, risk: irreversible, description: "Send an email outside the company" }
   - { name: doc.extract_fields, risk: read, description: "Extract named fields from a document, with source quotes" }
+  - { name: files.list, risk: read, description: "List files in the workspace" }
+  - { name: files.read_text, risk: read, description: "Read a workspace file as text (PDF, Excel, CSV)" }
+  - { name: files.save_text, risk: write, description: "Save a new text/CSV/Markdown file in the workspace (never overwrites)" }
+  - { name: eproc.list_tenders, risk: read, description: "List tenders on the e-procurement portal" }
+  - { name: eproc.get_tender, risk: read, description: "Read a tender with its bidders, bid amounts and EMD guarantees" }
+  - { name: eproc.download_document, risk: read, description: "Download a bidder's document from eProcure into the workspace" }
+  - { name: udyam.lookup, risk: read, description: "Udyam portal: verify an MSME registration number" }
   - { name: check.gstin, risk: read, description: "GSTIN format, checksum, state and embedded-PAN checks" }
   - { name: check.pan, risk: read, description: "PAN format and holder type" }
   - { name: check.ifsc, risk: read, description: "IFSC existence (offline dataset) + branch details (live API)" }
@@ -35,7 +42,10 @@ tools:
   - { name: match.find_duplicates, risk: read, description: "Find likely duplicate vendors" }
   - { name: hr.search_employees, risk: read, description: "Search employee addresses and bank accounts for conflicts" }
   - { name: lists.check_debarment, risk: read, description: "Check the debarment / blacklist register" }
+  - { name: payments.list_batches, risk: read, description: "List payment batches" }
   - { name: payments.get_batch, risk: read, description: "Read a payment batch and its lines" }
+  - { name: payments.paid_bills, risk: read, description: "Bills already paid (optionally for one vendor)" }
+  - { name: payments.clear_line, risk: write, description: "Mark one payment line as checked and OK to pay" }
   - { name: payments.hold_line, risk: write, description: "Hold one payment line with a reason" }
   - { name: payments.correct_line, risk: write, description: "Correct a deduction on a payment line" }
   - { name: payments.release_batch, risk: irreversible, description: "Release a payment batch to the bank" }
@@ -43,6 +53,18 @@ tools:
   - { name: rules.msme_deadline, risk: read, description: "Compute the MSME 45-day deadline (Sec. 43B(h))" }
   - { name: human.request_approval, risk: read, description: "Ask the user to approve an action, with diff and evidence" }
   - { name: human.create_task, risk: read, description: "Give the user a task only a human can do (e.g. a phone call)" }
+
+# Scope charter (Framework Spec §10): requests outside it are politely refused.
+scope:
+  does:
+    - "vendor and contractor onboarding / empanelment checks"
+    - "pre-payment integrity checks on payment batches (vendor status, bank details, duplicates, TDS, MSME deadlines)"
+    - "bank-detail change requests and fraud red flags"
+    - "related vendor-master questions and reports: guarantees, dormant vendors, debarment, duplicates, reconciliations"
+  does_not:
+    - "release payments or authorise bank uploads (a human checker does that)"
+    - "change bank details without a call-back and your approval"
+    - "anything outside vendor / payment integrity: marketing, HR matters, travel, general writing, coding"
 
 # Checks a step can require. deterministic = code decides; judged = LLM decides from evidence.
 checks:

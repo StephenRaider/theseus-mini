@@ -23,41 +23,45 @@ rules:
 steps:
   - id: vendor
     title: Vendor
-    goal: Confirm the vendor is Active and not debarred.
-    tools: [vendor.get, lists.check_debarment]
+    goal: Confirm the vendor is Active and not debarred; hold the line if not.
+    tools: [payments.get_batch, vendor.get, lists.check_debarment, payments.hold_line]
     checks: [vendor_active]
     on_fail: needs_you
+    risk: write
   - id: bank
     title: Bank
     goal: Confirm the line's bank account equals the vendor master, and flag accounts changed in the last 30 days.
-    tools: [vendor.get]
+    tools: [payments.get_batch, vendor.get, mail.read, bank.penny_drop, payments.hold_line]
     checks: [bank_matches_master, no_recent_bank_change]
     on_fail: needs_you
+    risk: write
   - id: duplicate
     title: Duplicate
     goal: Check for a duplicate bill (same vendor + bill number, or same amount within 30 days).
-    tools: [payments.get_batch, vendor.get]
+    tools: [payments.get_batch, payments.paid_bills, vendor.get, payments.hold_line]
     checks: [no_duplicate_bill]
     on_fail: needs_you
+    risk: write
   - id: tds
     title: TDS
     goal: Recompute contractor TDS and correct the line if it differs.
-    tools: [rules.contractor_tds, payments.correct_line]
+    tools: [payments.get_batch, vendor.get, payments.paid_bills, rules.contractor_tds, payments.correct_line]
     checks: [tds_correct]
     on_fail: needs_you
     risk: write
   - id: msme
     title: MSME
     goal: For micro/small vendors compute the 43B(h) deadline and flag lines due soon or overdue.
-    tools: [rules.msme_deadline]
+    tools: [payments.get_batch, vendor.get, rules.msme_deadline]
     checks: [msme_deadline_ok]
     on_fail: continue
   - id: decide
     title: Decide
     goal: Mark the line cleared, or hold it with a clear reason and the evidence.
-    tools: [payments.hold_line]
+    tools: [payments.get_batch, payments.clear_line, payments.hold_line]
     checks: []
     on_fail: needs_you
     risk: write
+    needs: [vendor, bank, duplicate, tds, msme]
 widget:
   type: item_grid

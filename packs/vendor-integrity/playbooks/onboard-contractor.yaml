@@ -27,53 +27,61 @@ steps:
   - id: collect
     title: Docs
     goal: Find the contractor's email and collect GST certificate, PAN, cancelled cheque or bank letter, Udyam certificate (if any) and address.
-    tools: [mail.search, mail.read, mail.download_attachment, mail.draft_reply]
+    tools: [mail.search, mail.read, mail.download_attachment, mail.draft_reply, eproc.get_tender, eproc.download_document, doc.extract_fields]
     checks: [docs_complete]
     on_fail: needs_you
     risk: write
   - id: extract
     title: Extract
     goal: Extract legal name, GSTIN, PAN, address + state, bank account, IFSC, account holder name, Udyam number and category, with a source quote for each.
-    tools: [doc.extract_fields]
+    tools: [doc.extract_fields, files.read_text]
     checks: [fields_extracted]
     on_fail: needs_you
+    needs: [collect]
   - id: gstin
     title: GSTIN
     goal: Validate the GSTIN (format, checksum, state matches address, embedded PAN matches PAN) and confirm it is Active on the GST portal.
-    tools: [check.gstin, check.pan, gov.gstin_status]
+    tools: [check.gstin, check.pan, gov.gstin_status, mail.draft_reply]
     checks: [gstin_valid, gstin_active]
     on_fail: needs_you
+    risk: write
+    needs: [extract]
   - id: bank
     title: Bank
     goal: Validate the IFSC and verify the account holder name via penny-drop.
     tools: [check.ifsc, bank.penny_drop]
     checks: [ifsc_valid, account_name_matches]
     on_fail: needs_you
+    needs: [extract]
   - id: msme
     title: MSME
     goal: Record the Udyam category (micro / small / medium / none) so payment deadlines can be enforced.
-    tools: []
+    tools: [udyam.lookup]
     checks: [msme_classified]
     on_fail: continue
+    needs: [extract]
   - id: risk
     title: Risk
     goal: Check for duplicate vendors, conflicts with employees (address / bank account) and the debarment register.
     tools: [match.find_duplicates, vendor.search, hr.search_employees, lists.check_debarment]
     checks: [no_duplicates, no_employee_conflict, not_debarred]
     on_fail: needs_you
+    needs: [extract]
   - id: create
     title: Create
     goal: Create the vendor in the ERP as Pending with the verified fields, and attach the evidence.
-    tools: [vendor.create_pending, vendor.update_pending, vendor.get]
+    tools: [vendor.create_pending, vendor.update_pending, vendor.get, vendor.search]
     checks: [vendor_pending_created]
     on_fail: needs_you
     risk: write
+    needs: [gstin, bank, msme, risk]
   - id: approve
     title: Approve
     goal: Ask the user to approve activation (maker-checker), showing the fields and the evidence. Activate only after approval.
-    tools: [human.request_approval, vendor.activate]
+    tools: [human.request_approval, vendor.activate, vendor.get]
     checks: [maker_checker_approved]
     on_fail: needs_you
     risk: irreversible
+    needs: [create]
 widget:
   type: item_grid

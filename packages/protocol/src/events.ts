@@ -71,6 +71,74 @@ export const EventBody = z.discriminatedUnion("type", [
       ),
     }),
   ),
+  /* ---- M3b: discovery, mid-work conversation, model calls ---- */
+  ev(
+    "orient.completed",
+    z.object({
+      taskId: Id,
+      /** What the employee looked at and judged relevant (files, emails, records). */
+      found: z.array(z.object({ kind: z.string(), ref: z.string(), label: z.string(), why: z.string().optional() })),
+      /** Visible assumptions (Framework Spec §10). */
+      assumptions: z.array(z.string()).default([]),
+    }),
+  ),
+  ev(
+    "constraint.added",
+    z.object({
+      constraintId: Id,
+      employeeId: Id,
+      taskId: Id.optional(),
+      /** The user's words. */
+      text: z.string(),
+      /** Entity keys the constraint protects, e.g. "vendor:V-101". */
+      subjects: z.array(z.string()),
+      /** Plan items it covers at the time it was added. */
+      itemIds: z.array(z.string()).default([]),
+      /** "writes": block write + irreversible tool calls on the subjects. */
+      blocks: z.enum(["writes"]),
+      sourceNudgeId: Id.optional(),
+    }),
+  ),
+  ev("constraint.lifted", z.object({ constraintId: Id, reason: z.string() })),
+  ev(
+    "question.asked",
+    z.object({
+      questionId: Id,
+      employeeId: Id,
+      taskId: Id.optional(),
+      itemId: z.string().optional(),
+      stepId: z.string().optional(),
+      text: z.string(),
+      /** Blocking: only this item (or task setup) waits. Soft: proceeds with `default`. */
+      blocking: z.boolean(),
+      default: z.string().optional(),
+      options: z.array(z.string()).default([]),
+    }),
+  ),
+  ev("question.answered", z.object({ questionId: Id, answer: z.string(), by: Actor, usedDefault: z.boolean().default(false) })),
+  ev(
+    "nudge.triaged",
+    z.object({
+      nudgeId: Id,
+      kind: z.enum(["question", "steer", "info", "new_task", "stop", "pause", "resume", "unclear"]),
+      /** How it was classified: plain rules first, the model only when rules can't tell. */
+      by: z.enum(["rules", "model"]),
+      detail: z.string().optional(),
+    }),
+  ),
+  ev(
+    "model.called",
+    z.object({
+      callId: Id,
+      taskId: Id.optional(),
+      purpose: z.string(),
+      model: z.string(),
+      ok: z.boolean(),
+      cached: z.boolean().default(false),
+      durationMs: z.number().nonnegative(),
+      error: z.string().optional(),
+    }),
+  ),
   ev("plank.proposed", Plank),
   ev(
     "plank.resolved",

@@ -2,16 +2,21 @@
   "name": "@theseus/server",
   "version": "0.1.0",
   "private": true,
-  "description": "Runs employees, stores events, serves the WebSocket API.",
+  "description": "Runs employees: harness wiring, headless CLI (pnpm agent), and (M5) the live connection to the app.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/harness.ts",
+    "./world": "./src/world.ts",
+    "./scripted": "./src/scripted.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "agent": "tsx src/agent.ts"
   },
   "dependencies": {
     "@theseus/protocol": "workspace:*",
-    "@theseus/core": "workspace:*"
+    "@theseus/core": "workspace:*",
+    "@theseus/kaveri": "workspace:*",
+    "@theseus/pack-vendor-integrity": "workspace:*"
   }
 }
