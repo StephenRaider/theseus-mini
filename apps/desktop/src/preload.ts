@@ -22,6 +22,26 @@ const api: TheseusBridge = {
   pickAttachments: () => call("files:pick"),
   // Dropped File objects carry their real path only here (webUtils), never in the page.
   importDropped: (files) => call("files:importPaths", files.map((f) => webUtils.getPathForFile(f)).filter(Boolean)),
+  agent: {
+    init: () => call("agent:init"),
+    command: (command) => call("agent:command", command),
+    restart: (mode) => call("agent:restart", mode),
+    onEvent: (cb) => {
+      const listener = (_e: unknown, event: Parameters<typeof cb>[0]) => cb(event);
+      ipcRenderer.on("agent:event", listener);
+      return () => ipcRenderer.removeListener("agent:event", listener);
+    },
+    onStatus: (cb) => {
+      const listener = (_e: unknown, status: Parameters<typeof cb>[0]) => cb(status);
+      ipcRenderer.on("agent:status", listener);
+      return () => ipcRenderer.removeListener("agent:status", listener);
+    },
+    onReset: (cb) => {
+      const listener = () => cb();
+      ipcRenderer.on("agent:reset", listener);
+      return () => ipcRenderer.removeListener("agent:reset", listener);
+    },
+  },
   onFilesChanged: (cb) => {
     const listener = (_e: unknown, change: FileChange) => cb(change);
     ipcRenderer.on("files:changed", listener);

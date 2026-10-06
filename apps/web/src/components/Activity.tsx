@@ -54,6 +54,31 @@ export function Activity({ state, employeeId, now }: { state: AppState; employee
         case "verification.completed":
           add("green", `Verifier: ${e.payload.results.filter((r) => r.verdict === "pass").length}/${e.payload.results.length} criteria pass`);
           break;
+        case "orient.completed":
+          if (e.payload.found.length) add("neutral", `Looked at: ${e.payload.found.map((f) => f.label).join("; ")}`);
+          if (e.payload.assumptions.length) add("neutral", `Assumed: ${e.payload.assumptions.join(" · ")}`);
+          break;
+        case "question.asked":
+          add(e.payload.blocking ? "red" : "accent", `${e.payload.blocking ? "Asked you" : "Asked you (going ahead meanwhile)"}: ${e.payload.text}`);
+          break;
+        case "question.answered":
+          add("green", e.payload.usedDefault ? `Kept the default: ${e.payload.answer}` : `Answer: ${e.payload.answer}`);
+          break;
+        case "constraint.added":
+          add("held", `Standing instruction: “${e.payload.text}”`);
+          break;
+        case "constraint.lifted":
+          add("accent", `Instruction lifted: ${e.payload.reason}`);
+          break;
+        case "nudge.triaged":
+          add("neutral", `Understood your message as: ${e.payload.kind}${e.payload.detail ? ` (${e.payload.detail})` : ""}${e.payload.by === "model" ? " · asked the model" : ""}`);
+          break;
+        case "tool.completed":
+          if (!e.payload.ok && e.payload.error?.class === "policy_violation") add("red", `Blocked: ${e.payload.error.message}`);
+          break;
+        case "model.called":
+          add(e.payload.ok ? "neutral" : "yellow", `Model: ${e.payload.purpose}${e.payload.ok ? "" : ` failed (${e.payload.error})`}${e.payload.cached ? " (cached)" : ""} · ${(e.payload.durationMs / 1000).toFixed(1)}s`);
+          break;
         case "message.posted":
           if (e.payload.attachments.length) add("neutral", `Files: ${e.payload.attachments.map((a) => a.name).join(", ")}`);
           break;

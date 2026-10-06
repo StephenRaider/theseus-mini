@@ -61,6 +61,11 @@ export function pendingApprovals(s: AppState, employeeId: string) {
   return s.approvalOrder.map((id) => s.approvals[id]!).filter((a) => a.status === "pending" && s.tasks[a.taskId]?.employeeId === employeeId);
 }
 
+/** Blocking questions still waiting for an answer. */
+export function openQuestions(s: AppState, employeeId: string) {
+  return s.questionOrder.map((id) => s.questions[id]!).filter((q) => q.employeeId === employeeId && q.blocking && !q.answer);
+}
+
 /* ------------------------------------------------------------ left column */
 
 /** How long a finished task keeps showing as "Completed …" before the list falls back to the last message. */
@@ -93,7 +98,8 @@ export function sidebarPreview(s: AppState, employeeId: string, now: string): Pr
     const prog = p.total ? `${p.done}/${p.total}` : undefined;
     if (emp.status === "waiting_on_user") {
       const first = pendingApprovals(s, employeeId)[0];
-      return { kind: "waiting", text: first ? first.title : taskTitle(task), progress: prog };
+      const q = openQuestions(s, employeeId)[0];
+      return { kind: "waiting", text: first ? first.title : q ? q.text : taskTitle(task), progress: prog };
     }
     return { kind: "working", text: (emp.status === "paused" ? "Paused · " : "") + taskTitle(task), progress: prog };
   }
@@ -125,7 +131,7 @@ export interface Badges {
 }
 
 export function badges(s: AppState, employeeId: string, seenCount: number): Badges {
-  const needsYou = pendingApprovals(s, employeeId).length;
+  const needsYou = pendingApprovals(s, employeeId).length + openQuestions(s, employeeId).length;
   let warnings = 0;
   const task = currentTask(s, employeeId);
   const plan = task ? s.plans[task.id] : undefined;

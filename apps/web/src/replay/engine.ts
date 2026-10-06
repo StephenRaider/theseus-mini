@@ -92,6 +92,7 @@ type Timer = { at: number; seq: number; fn: () => void };
 /* ------------------------------------------------------------------ engine */
 
 export class ReplayEngine {
+  readonly kind = "replay" as const;
   state: AppState = emptyState();
   private clock: number;
   private seq = 0;

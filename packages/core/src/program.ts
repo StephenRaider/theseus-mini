@@ -196,6 +196,88 @@ export const allTrue = (cs: Condition[] | undefined, scope: unknown, today: stri
 /** Plain-language form of a condition, for notes: "steps.verify.confirmed eq false". */
 export const describeCondition = (c: Condition) => `${c.agg ? `${c.agg}(${c.path})` : c.path} ${c.op.replace(/_/g, " ")}${c.value !== undefined ? ` ${c.value}` : ""}`;
 
+/* ------------------------------------------------------------------ normalisation (weak models write "3 months") */
+
+const DATE_OPS = new Set(["days_ago_gt", "days_ago_lt", "days_until_lt", "days_until_gt"]);
+const NUMBER_OPS = new Set(["lt", "lte", "gt", "gte"]);
+const WORD_NUMBERS: Record<string, number> = {
+  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, fifteen: 15, eighteen: 18, twenty: 20, thirty: 30, sixty: 60, ninety: 90,
+};
+const UNIT_DAYS: Record<string, number> = { day: 1, week: 7, month: 30, year: 365 };
+
+/** "3 months" → 90, "six weeks" → 42, "90 days" → 90, "180" → 180; undefined if it isn't a duration. */
+export function toDays(v: string | undefined): number | undefined {
+  if (v === undefined) return undefined;
+  const t = v.trim().toLowerCase();
+  if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
+  const m = /^(-?\d+(?:\.\d+)?|[a-z]+)\s*(day|week|month|year)s?$/.exec(t);
+  if (!m) return undefined;
+  const n = /^-?\d/.test(m[1]!) ? Number(m[1]) : WORD_NUMBERS[m[1]!];
+  return n === undefined ? undefined : Math.round(n * UNIT_DAYS[m[2]!]!);
+}
+
+/**
+ * Fix what can be fixed safely (durations written in words) and return notes
+ * about it, so the plan shows what was assumed. Mutates and returns `p`.
+ */
+export function normalizeProgram(p: Program): { program: Program; notes: string[] } {
+  const notes: string[] = [];
+  const fix = (c: Condition) => {
+    if (!DATE_OPS.has(c.op) || c.value === undefined) return;
+    const d = toDays(c.value);
+    if (d !== undefined && String(d) !== c.value.trim()) {
+      notes.push(`read "${c.value}" as ${d} days`);
+      c.value = String(d);
+    }
+  };
+  for (const c of p.items.where ?? []) fix(c);
+  for (const st of p.steps) for (const c of st.flagIf ?? []) fix(c);
+  return { program: p, notes };
+}
+
+/**
+ * Does this path exist in the data's SHAPE? true / false, or "unknown" when a
+ * list on the way is empty (nothing to look inside). Used to catch a program
+ * that reads a field the tool never returns: the classic weak-model mistake,
+ * which would otherwise make every condition silently true or false.
+ */
+export function pathResolves(obj: unknown, path: string): boolean | "unknown" {
+  if (!path) return true;
+  let cur: unknown[] = [obj];
+  for (const raw of path.split(".").filter(Boolean)) {
+    const many = raw.endsWith("[]");
+    const key = many ? raw.slice(0, -2) : raw;
+    const objects = cur.filter((c): c is Record<string, unknown> => c != null && typeof c === "object");
+    if (!objects.length) return cur.length ? false : "unknown";
+    const holders = key ? objects.filter((o) => key in o) : objects;
+    if (!holders.length) return false;
+    const next: unknown[] = [];
+    for (const h of holders) {
+      const v = key ? h[key] : h;
+      if (many) {
+        if (!Array.isArray(v)) return false;
+        next.push(...v);
+      } else next.push(v);
+    }
+    cur = next;
+    if (!cur.length) return "unknown";
+  }
+  return true;
+}
+
+/** Every path a program reads, with where it's used (for checks and repairs). */
+export function programPaths(p: Program): { path: string; where: string; cond?: Condition; stepIndex: number }[] {
+  const out: { path: string; where: string; cond?: Condition; stepIndex: number }[] = [];
+  const fromTemplate = (t: string) => [...t.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map((m) => m[1]!);
+  p.steps.forEach((st, i) => {
+    for (const v of Object.values(st.args)) for (const path of fromTemplate(v)) out.push({ path, where: `step "${st.id}" args`, stepIndex: i });
+    for (const c of st.flagIf ?? []) out.push({ path: c.path, where: `step "${st.id}" flagIf`, cond: c, stepIndex: i });
+  });
+  for (const c of p.columns) out.push({ path: c.path, where: `column "${c.title}"`, stepIndex: p.steps.length });
+  return out;
+}
+
 /** Static checks before running a composed program. Returns problems (empty = OK). */
 export function validateProgram(
   p: Program,
@@ -214,6 +296,27 @@ export function validateProgram(
     if (ids.has(s.id)) problems.push(`duplicate step id "${s.id}"`);
     ids.add(s.id);
     check(s.tool, `step "${s.id}"`);
+  }
+  // Conditions: numbers where numbers are needed.
+  const conds = [...(p.items.where ?? []).map((c) => ({ c, where: "items.where" })), ...p.steps.flatMap((s) => (s.flagIf ?? []).map((c) => ({ c, where: `step "${s.id}" flagIf` })))];
+  for (const { c, where } of conds) {
+    if (DATE_OPS.has(c.op) && toDays(c.value) === undefined) problems.push(`${where}: ${c.op} needs value = a number of days (got "${c.value ?? ""}")`);
+    if (NUMBER_OPS.has(c.op) && (c.value === undefined || Number.isNaN(Number(c.value)))) problems.push(`${where}: ${c.op} needs a number as value (got "${c.value ?? ""}")`);
+  }
+  // Paths: only item.*, params.* or a step that has already run.
+  const stepIds = p.steps.map((s) => s.id);
+  for (const { path, where, stepIndex } of programPaths(p)) {
+    const head = path.split(".")[0];
+    if (head === "item" || head === "params") continue;
+    if (head !== "steps") {
+      problems.push(`${where}: path "${path}" must start with item., steps.<id>. or params.`);
+      continue;
+    }
+    const id = path.split(".")[1]?.replace(/\[\]$/, "");
+    const at = stepIds.indexOf(id ?? "");
+    const isFlag = where.endsWith("flagIf");
+    if (at < 0) problems.push(`${where}: "${path}" refers to a step "${id}" that doesn't exist`);
+    else if (at > stepIndex || (at === stepIndex && !isFlag)) problems.push(`${where}: "${path}" reads step "${id}" before it has run`);
   }
   return problems;
 }

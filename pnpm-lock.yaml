@@ -113,6 +113,9 @@ importers:
       '@theseus/kaveri':
         specifier: workspace:*
         version: link:../kaveri
+      '@theseus/server':
+        specifier: workspace:*
+        version: link:../server
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -146,6 +149,9 @@ importers:
       '@theseus/protocol':
         specifier: workspace:*
         version: link:../protocol
+      docx:
+        specifier: ^9.8.1
+        version: 9.8.1
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0

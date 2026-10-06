@@ -1,5 +1,6 @@
+import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { GeminiAdapter, Kernel, RateLimiter, ScriptedModel, withCache, withRateLimit, type EventLog, type ModelAdapter } from "@theseus/core";
+import { EventLog, GeminiAdapter, Kernel, RateLimiter, ScriptedModel, withCache, withRateLimit, withTrace, type ModelAdapter } from "@theseus/core";
 import { createVendorIntegrityRuntime } from "@theseus/pack-vendor-integrity/runtime";
 import type { World } from "./world.ts";
 
@@ -45,3 +46,25 @@ export function modelFromEnv(opts: { cache?: boolean } = {}): ModelAdapter {
 }
 
 export { ScriptedModel };
+
+/**
+ * Flight recorder for one session: every event and every model call go to
+ * .theseus/runs/<time>.events.jsonl and <time>.model.jsonl (git-ignored).
+ * Keeps the newest 40 files so the folder doesn't grow forever.
+ */
+export function recorder(label: string): { log: EventLog; trace: (m: ModelAdapter) => ModelAdapter; dir: string; stamp: string } {
+  const dir = join(REPO_ROOT, ".theseus/runs");
+  const stamp = `${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}-${label}`;
+  try {
+    const old = readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort();
+    for (const f of old.slice(0, Math.max(0, old.length - 38))) rmSync(join(dir, f), { force: true });
+  } catch {
+    /* first run: no folder yet */
+  }
+  return {
+    log: new EventLog({ file: join(dir, `${stamp}.events.jsonl`) }),
+    trace: (m) => (m.name === "scripted" ? m : withTrace(m, join(dir, `${stamp}.model.jsonl`))),
+    dir,
+    stamp,
+  };
+}

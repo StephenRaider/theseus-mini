@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
@@ -126,6 +126,39 @@ export function withRateLimit(model: ModelAdapter, limiter: RateLimiter): ModelA
     async generate(req) {
       await limiter.acquire();
       return model.generate(req);
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ flight recorder */
+
+/**
+ * Appends every model call (purpose, full prompt, reply, timing, error) to a
+ * JSON-lines file. Local only (.theseus/ is git-ignored). When a live run goes
+ * wrong, this file shows exactly what the model was asked and what it said.
+ */
+export function withTrace(model: ModelAdapter, file: string): ModelAdapter {
+  mkdirSync(dirname(file), { recursive: true });
+  const write = (o: unknown) => {
+    try {
+      appendFileSync(file, `${JSON.stringify(o)}\n`);
+    } catch {
+      /* the recorder must never break a run */
+    }
+  };
+  return {
+    name: model.name,
+    async generate(req) {
+      const t0 = Date.now();
+      const base = { at: new Date().toISOString(), model: model.name, purpose: req.purpose, system: req.system, prompt: req.prompt };
+      try {
+        const res = await model.generate(req);
+        write({ ...base, ms: Date.now() - t0, reply: res.text, usage: res.usage, cached: !!res.cached });
+        return res;
+      } catch (e) {
+        write({ ...base, ms: Date.now() - t0, error: (e as Error).message });
+        throw e;
+      }
     },
   };
 }

@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/harness.ts",
     "./world": "./src/world.ts",
-    "./scripted": "./src/scripted.ts"
+    "./scripted": "./src/scripted.ts",
+    "./host": "./src/host.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

@@ -26,7 +26,46 @@ export interface CheckView {
   at: string;
 }
 
+export interface QuestionView {
+  id: string;
+  employeeId: string;
+  taskId?: string;
+  itemId?: string;
+  text: string;
+  blocking: boolean;
+  default?: string;
+  options: string[];
+  at: string;
+  answer?: { text: string; by: string; usedDefault: boolean; at: string };
+}
+
+export interface ConstraintView {
+  id: string;
+  employeeId: string;
+  taskId?: string;
+  text: string;
+  subjects: string[];
+  at: string;
+  lifted?: { reason: string; at: string };
+}
+
+export interface OrientView {
+  taskId: string;
+  found: { kind: string; ref: string; label: string; why?: string }[];
+  assumptions: string[];
+  at: string;
+}
+
 export interface AppState {
+  /** Questions employees asked you mid-work (Framework Spec §11). */
+  questions: Record<string, QuestionView>;
+  questionOrder: string[];
+  /** Standing instructions ("hold everything to X"), enforced at the tool gateway. */
+  constraints: Record<string, ConstraintView>;
+  /** What each task looked at before planning, and what it assumed. */
+  orients: Record<string, OrientView>;
+  /** Model calls so far (live runs spend a daily quota). */
+  modelCalls: number;
   employees: Record<string, Employee>;
   /** Display order: Theseus first, then creation order. */
   employeeOrder: string[];
@@ -48,6 +87,11 @@ export interface AppState {
 }
 
 export const emptyState = (): AppState => ({
+  questions: {},
+  questionOrder: [],
+  constraints: {},
+  orients: {},
+  modelCalls: 0,
   employees: {},
   employeeOrder: [],
   tasks: {},
@@ -151,6 +195,37 @@ export function reduce(prev: AppState, e: TheseusEvent): AppState {
       s.checks = [...s.checks, { taskId: p.taskId, itemId: p.itemId, stepId: p.stepId, checkId: p.checkId, verdict: p.verdict, detail: p.detail, at: e.ts }];
       break;
     }
+    case "question.asked": {
+      const p = e.payload;
+      s.questions = {
+        ...s.questions,
+        [p.questionId]: { id: p.questionId, employeeId: p.employeeId, ...(p.taskId ? { taskId: p.taskId } : {}), ...(p.itemId ? { itemId: p.itemId } : {}), text: p.text, blocking: p.blocking, ...(p.default !== undefined ? { default: p.default } : {}), options: p.options, at: e.ts },
+      };
+      s.questionOrder = [...s.questionOrder, p.questionId];
+      touch(s, p.employeeId, e.ts);
+      break;
+    }
+    case "question.answered": {
+      const q = s.questions[e.payload.questionId];
+      if (q) s.questions = { ...s.questions, [q.id]: { ...q, answer: { text: e.payload.answer, by: e.payload.by, usedDefault: e.payload.usedDefault, at: e.ts } } };
+      break;
+    }
+    case "constraint.added": {
+      const p = e.payload;
+      s.constraints = { ...s.constraints, [p.constraintId]: { id: p.constraintId, employeeId: p.employeeId, ...(p.taskId ? { taskId: p.taskId } : {}), text: p.text, subjects: p.subjects, at: e.ts } };
+      break;
+    }
+    case "constraint.lifted": {
+      const c = s.constraints[e.payload.constraintId];
+      if (c) s.constraints = { ...s.constraints, [c.id]: { ...c, lifted: { reason: e.payload.reason, at: e.ts } } };
+      break;
+    }
+    case "orient.completed":
+      s.orients = { ...s.orients, [e.payload.taskId]: { ...e.payload, at: e.ts } };
+      break;
+    case "model.called":
+      s.modelCalls = prev.modelCalls + 1;
+      break;
     default:
       break;
   }

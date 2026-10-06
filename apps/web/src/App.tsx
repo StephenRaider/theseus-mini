@@ -5,6 +5,7 @@ import { Chat } from "./components/Chat.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { Icon } from "./components/ui.tsx";
 import { Work } from "./components/Work.tsx";
+import { LiveEngine } from "./live/engine.ts";
 import { ReplayEngine } from "./replay/engine.ts";
 import { kaveriDemo } from "./replay/kaveri-demo.ts";
 import { badges, clock } from "./state/selectors.ts";
@@ -32,8 +33,12 @@ const store = {
   },
 };
 
-function makeEngine() {
+type Engine = LiveEngine | ReplayEngine;
+
+/** Desktop app → the real employees (live or demo model). Plain browser → the scripted replay. */
+function makeEngine(): Engine {
   const b = bridge();
+  if (b?.agent) return new LiveEngine(b.agent);
   return new ReplayEngine(kaveriDemo(), b ? { writeNew: (root, rel, text) => b.writeNew(root, rel, text) } : undefined);
 }
 
@@ -42,6 +47,11 @@ export function App() {
   const snap = useSyncExternalStore(
     useCallback((fn) => engine.subscribe(fn), [engine]),
     () => engine.state,
+  );
+  // Live-engine status (mode, model, errors) changes without a new state object.
+  const status = useSyncExternalStore(
+    useCallback((fn) => engine.subscribe(fn), [engine]),
+    () => (engine.kind === "live" ? `${engine.info?.mode ?? ""}|${engine.info?.model ?? ""}|${engine.error ?? ""}|${engine.connecting}` : "replay"),
   );
   // The clock moves even when no event fires; re-read it on every tick.
   const [now, setNow] = useState(engine.now);
@@ -64,8 +74,13 @@ export function App() {
   useEffect(() => store.set("speed", speed), [speed]);
   useEffect(() => store.set("naming", naming), [naming]);
 
-  // Simulated time.
+  // Simulated time (replay) or the real clock (live).
   useEffect(() => {
+    if (engine.kind === "live") {
+      setNow(engine.now);
+      const id = setInterval(() => setNow(engine.now), 15_000);
+      return () => clearInterval(id);
+    }
     if (!playing) return;
     const id = setInterval(() => {
       engine.advance(TICK_MS * SIM_RATE * speed);
@@ -73,6 +88,15 @@ export function App() {
     }, TICK_MS);
     return () => clearInterval(id);
   }, [engine, playing, speed]);
+  useEffect(() => {
+    if (engine.kind !== "live") return;
+    engine.start();
+    return () => engine.dispose();
+  }, [engine]);
+  // Live: keep "now" fresh whenever something happens, so new bubbles never look "in the future".
+  useEffect(() => {
+    if (engine.kind === "live") setNow(engine.now);
+  }, [engine, snap]);
 
   // The open chat counts as read.
   const openCount = snap.messages[selected]?.length ?? 0;
@@ -117,8 +141,9 @@ export function App() {
 
   const send = useCallback((c: Command) => engine.send(c), [engine]);
 
-  const restart = () => {
-    setEngine(makeEngine());
+  const restart = (mode?: "live" | "demo") => {
+    if (engine.kind === "live") engine.restart(mode ?? engine.info?.mode);
+    else setEngine(makeEngine());
     setSelected(THESEUS_ID);
     setSeen({});
     setDrafts({});
@@ -129,8 +154,8 @@ export function App() {
     const names = Object.values(snap.employees).map((e) => e.name);
     const name = nextEmployeeName(naming, names);
     engine.send({ type: "create_employee", name, rolePack: "vendor-integrity" });
-    const id = engine.state.employeeOrder.at(-1)!;
-    setSelected(id);
+    // Replay answers synchronously; live answers with an event a moment later.
+    if (engine.kind === "replay") setSelected(engine.state.employeeOrder.at(-1)!);
   };
 
   const nudgeItem = (employeeId: string, label: string) => {
@@ -138,7 +163,38 @@ export function App() {
     setDrafts((d) => ({ ...d, [employeeId]: `About ${label}: ` }));
   };
 
-  const footer = (
+  const liveInfo = engine.kind === "live" ? engine.info : null;
+  const footer =
+    engine.kind === "live" ? (
+      <div className="replay">
+        <div className="replay__clock" title={liveInfo?.note ?? ""}>
+          <span className={`replay__dot ${liveInfo?.mode === "live" ? "replay__dot--live" : ""}`} data-on={!engine.connecting && !engine.error} />
+          <span>
+            {engine.connecting ? (
+              <b>Starting…</b>
+            ) : engine.error && !liveInfo ? (
+              <b>Agent stopped</b>
+            ) : liveInfo?.mode === "live" ? (
+              <>
+                <b>Live</b> {liveInfo.model.replace(/^gemini:/, "")} · {snap.modelCalls} call{snap.modelCalls === 1 ? "" : "s"}
+              </>
+            ) : (
+              <>
+                <b>Demo</b> scripted model
+              </>
+            )}
+          </span>
+        </div>
+        <div className="replay__controls">
+          <button className="btn btn--small" title={liveInfo?.mode === "live" ? "Switch to the scripted demo model (no quota)" : "Switch to the live model (needs GEMINI_API_KEY)"} onClick={() => restart(liveInfo?.mode === "live" ? "demo" : "live")} disabled={engine.connecting}>
+            {liveInfo?.mode === "live" ? "Use demo" : "Go live"}
+          </button>
+          <button className="iconbtn" title="Fresh company world (resets every system and the workspace)" onClick={() => restart()} disabled={engine.connecting}>
+            <Icon name="restart" size={16} />
+          </button>
+        </div>
+      </div>
+    ) : (
     <div className="replay">
       <div className="replay__clock">
         <span className="replay__dot" data-on={playing} />
@@ -155,12 +211,13 @@ export function App() {
             {s}×
           </button>
         ))}
-        <button className="iconbtn" title="Restart the demo" onClick={restart}>
+        <button className="iconbtn" title="Restart the demo" onClick={() => restart()}>
           <Icon name="restart" size={16} />
         </button>
       </div>
     </div>
   );
+  void status;
 
   return (
     <div className="app">
@@ -180,7 +237,7 @@ export function App() {
         now={now}
         threadId={selected}
         send={send}
-        suggestion={selected === THESEUS_ID && !engine.hasStarted ? kaveriDemo().request : undefined}
+        suggestions={selected === THESEUS_ID && !engine.hasStarted ? (engine.kind === "live" ? (liveInfo?.suggestions ?? []) : [kaveriDemo().request]) : []}
         draft={drafts[selected] ?? ""}
         setDraft={(v) => setDrafts((d) => ({ ...d, [selected]: v }))}
       />
@@ -233,7 +290,12 @@ export function App() {
             <div className="setting setting--note">
               <span>
                 <b>Running in</b>
-                <small>{bridge() ? `Desktop app (${bridge()!.platform})` : "Browser: open the desktop app (pnpm app) for local files"}</small>
+                <small>
+                  {bridge() ? `Desktop app (${bridge()!.platform})` : "Browser: open the desktop app (pnpm app) for local files"}
+                  {engine.kind === "live" && liveInfo
+                    ? ` · ${liveInfo.mode === "live" ? `live model ${liveInfo.model.replace(/^gemini:/, "")}` : "demo (scripted) model"}${liveInfo.note ? ` (${liveInfo.note})` : ""} · company date ${liveInfo.today}`
+                    : " · scripted replay"}
+                </small>
               </span>
             </div>
           </div>

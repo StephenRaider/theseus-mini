@@ -4,7 +4,7 @@ A harness for **AI employees** that take a goal, plan, use real tools, recover f
 
 The first employee is a **Vendor & Contractor Integrity Specialist** at *Kaveri Infra Pvt Ltd* (fictional). Its job is to make sure the company only pays the right party, the right amount, into the right account.
 
-> Status: **M3b, live agent loop (headless).** A real kernel runs the employee end to end from the terminal: it looks around first (inbox, portals, workspace files), decides how to handle the request (a whole playbook, part of one, or a plan it composes from its tools for a task it has never seen), works through every item with deterministic checks, asks before anything irreversible, takes your messages mid-work without stopping, verifies on a fresh read and reports. The desktop app (M3) still runs on a scripted replay; wiring it to the live kernel is M5. Underneath: contracts, role pack, deterministic checks and the mock company *Kaveri Infra* (six websites + a workspace of real Excel/PDF/Word files, 12 planted traps).
+> Status: **M3b, live agent loop, wired into the desktop app.** A real kernel runs each employee end to end: it looks around first (inbox, portals, workspace files), decides how to handle the request (a whole playbook, part of one, or a plan it composes from its tools for a task it has never seen), works through every item with deterministic checks, asks before anything irreversible, takes your messages mid-work without stopping, verifies on a fresh read and reports. The desktop app now runs the real employees (in their own process) and shows all of it: Theseus hands your request to an employee, the plan grid fills in live, approvals and questions appear in the chat, and your messages steer the work while it runs. Underneath: contracts, role pack, deterministic checks and the mock company *Kaveri Infra* (six websites + a workspace of real Excel/PDF/Word files, 12 planted traps).
 
 ## Quick start
 
@@ -23,7 +23,7 @@ pnpm app:prod      # same, from the built UI
 pnpm web           # the UI in a normal browser (no local-file features)
 ```
 
-Click **Try the demo** in Theseus's chat. Two employees start working; approve or reject their requests in the chat, click any row in the plan grid to hold / skip / retry it, or message a working employee to nudge it (“Hold everything to Shree Ganesh”). Results land as real files in `workspace/` and show up in the Files tab.
+The app starts the employees in a separate process with a fresh copy of the company world. With `GEMINI_API_KEY` in `.env` it runs **Live** on Gemini; without it, **Demo** (a scripted model for the example requests; tools, checks and company systems are real). Switch with the button at the bottom left; the ↻ button resets the world. Click an example request in Theseus's chat (or type your own): Theseus hands it to an employee, and you can open their chat to approve, answer questions, or steer them (“hold everything to Malnad Transport”, “how far are you?”, “pause”). Click any row in the plan grid to hold / skip / retry it. Results land as real files in `workspace/` and show up in the Files tab. In a plain browser (`pnpm web`) the UI falls back to the scripted M3 replay.
 
 Run the mock company (seven local sites + a workspace folder):
 
@@ -65,9 +65,9 @@ What it can be asked (the employee picks the route itself):
 | `packages/browser` | Playwright wrapper | ⏳ |
 | `packs/vendor-integrity` | Role pack: `pack.yaml` (tools, checks, scope charter), playbooks, deterministic validators (GSTIN, PAN, IFSC, TDS Sec. 393, MSME 43B(h), duplicate matching), and its runtime: tools over the company's systems and step handlers for the batch check and empanelment | ✅ M3b |
 | `apps/kaveri` | Mock company *Kaveri Infra Pvt Ltd* as **separate sites**: Mail (attachments, drafts), ERP (vendor master with maker-checker, payment batch + Excel export, HR/debarment), Bharat Bank (penny-drop, guarantee confirmation, bulk payment upload with maker-checker), GST portal, Udyam portal, eProcure (tender + bidder docs). Local **workspace** of real `.xlsx`/`.pdf`/`.docx` files. Seeded scenario (12 traps), fault injection, Control Room with ground truth | ✅ M2b |
-| `apps/server` | Wires a harness (kernel + pack + model + world), the `pnpm agent` CLI, an in-process world for tests, and a scripted stand-in model. WebSocket link to the app arrives in M5 | 🟡 M3b |
-| `apps/web` | Three-column UI (React + Vite): employee list with live status and red/yellow/green badges, chat with day separators, approval cards and nudges, plan grid with item actions, Files and Activity tabs. Driven by a **replay engine**, a simulated kernel that speaks the real protocol | ✅ M3 |
-| `apps/desktop` | Electron shell. Only the main process touches the disk, through `FileSandbox` (granted folders only, symlink-escape checks, never overwrites); the UI gets a narrow typed bridge (`window.theseus`) | ✅ M3 |
+| `apps/server` | Wires a harness (kernel + pack + model + world); the **agent host** the desktop app runs in its own process (plays Theseus, the manager, too); the `pnpm agent` CLI; an in-process world for tests; a scripted stand-in model | ✅ M3b |
+| `apps/web` | Three-column UI (React + Vite): employee list with live status and red/yellow/green badges, chat with day separators, approval cards and nudges, plan grid with item actions, Files and Activity tabs. In the desktop app it shows the **live employees** (questions, standing instructions, what they looked at); in a plain browser it falls back to the M3 replay | ✅ M3b |
+| `apps/desktop` | Electron shell. Only the main process touches the disk, through `FileSandbox` (granted folders only, symlink-escape checks, never overwrites); it forks the agent host and relays its events; the UI gets a narrow typed bridge (`window.theseus`) | ✅ M3b |
 | `evals` | Task suite + pass^k reports | ⏳ |
 
 ## Key ideas (short)

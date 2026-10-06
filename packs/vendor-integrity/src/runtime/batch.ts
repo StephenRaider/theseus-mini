@@ -187,7 +187,7 @@ export async function discoverBatch(ctx: PackCtx, vendorName: (id: string) => st
   if (b.status === "released") throw new Error(`${b.id} was already released`);
   return b.lines
     .filter((l) => l.status === "pending")
-    .map((l) => ({ id: l.id, label: `${vendorName(l.vendorId) ?? l.vendorId} · ${l.billNumber} · ${inr(l.gross)}`, ref: `${b.id}/${l.id}`, held: false }));
+    .map((l) => ({ id: l.id, label: `${l.id} · ${vendorName(l.vendorId) ?? l.vendorId} · ${inr(l.gross)}`, ref: `${b.id}/${l.id}`, held: false }));
 }
 
 export async function verifyBatch(ctx: PackCtx & { plan: Plan }): Promise<VerifyResult[]> {
@@ -200,10 +200,12 @@ export async function verifyBatch(ctx: PackCtx & { plan: Plan }): Promise<Verify
   for (const it of ctx.plan.items) {
     const l = b.lines.find((x) => x.id === it.id);
     if (!l) continue;
-    const cells = ctx.plan.steps.map((s) => ctx.plan.cells[it.id]![s.id]!.state);
-    const finished = cells.every((c) => c === "done" || c === "skipped");
+    // The Decide cell is what touches the ERP: done → cleared there; skipped (by you) → left untouched.
+    const decide = ctx.plan.cells[it.id]!.decide?.state;
+    const clearedInErp = ["cleared", "corrected"].includes(l.status);
     if (it.held && l.status !== "held") mismatched.push(`${it.id} held in plan but ${l.status} in ERP`);
-    if (!it.held && finished && ctx.plan.steps.some((s) => s.id === "decide") && !["cleared", "corrected"].includes(l.status)) mismatched.push(`${it.id} finished but ${l.status} in ERP`);
+    if (!it.held && decide === "done" && !clearedInErp) mismatched.push(`${it.id} finished but ${l.status} in ERP`);
+    if (!it.held && decide === "skipped" && clearedInErp) mismatched.push(`${it.id} was skipped but is ${l.status} in ERP`);
     if (l.status === "cleared" || l.status === "corrected") {
       const v = vendors.get(l.vendorId) ?? (await ctx.call<VendorRec>("vendor.get", { id: l.vendorId }));
       vendors.set(l.vendorId, v);
@@ -226,16 +228,18 @@ export async function reportBatch(ctx: PackCtx & { plan: Plan }): Promise<string
   const cleared = lines.filter((l) => l.status === "cleared" || l.status === "corrected");
   const msmeDue = plan.items.filter((i) => (plan.cells[i.id]?.msme?.note ?? "").startsWith("⚠"));
   const parked = plan.items.filter((i) => plan.steps.some((s) => plan.cells[i.id]![s.id]!.state === "needs_you" || plan.cells[i.id]![s.id]!.state === "failed"));
+  const skipped = plan.items.filter((i) => !i.held && plan.cells[i.id]?.decide?.state === "skipped");
   const partial = !plan.steps.some((s) => s.id === "decide");
   const out = [
     `${b.id}: checked ${plan.items.length} line${plan.items.length === 1 ? "" : "s"}${partial ? ` (only: ${plan.steps.map((s) => s.title).join(", ")})` : ""}.`,
     partial
       ? `${corrected.length} corrected${held.length ? ` · ${held.length} held` : ""}${parked.length ? ` · ${parked.length} need you` : ""}.`
-      : `${cleared.length} cleared${corrected.length ? ` (${corrected.length} after a TDS correction)` : ""} · ${held.length} held${parked.length ? ` · ${parked.length} need you` : ""}.`,
+      : `${cleared.length} cleared${corrected.length ? ` (${corrected.length} after a TDS correction)` : ""} · ${held.length} held${skipped.length ? ` · ${skipped.length} skipped by you` : ""}${parked.length ? ` · ${parked.length} need you` : ""}.`,
     corrected.length ? `Corrected:\n${corrected.map((i) => `• ${i.label}: ${plan.cells[i.id]!.tds!.note}`).join("\n")}` : "",
     held.length ? `Held:\n${held.map((i) => `• ${i.label}: ${i.holdReason}`).join("\n")}` : "",
     msmeDue.length ? `MSME payments due now (pay in this batch):\n${msmeDue.map((i) => `• ${i.label}: ${plan.cells[i.id]!.msme!.note!.replace(/^⚠\s*/, "")}`).join("\n")}` : "",
     parked.length ? `Need you:\n${parked.map((i) => `• ${i.label}`).join("\n")}` : "",
+    skipped.length && !partial ? `Skipped, as you asked (left pending in the ERP, not cleared):\n${skipped.map((i) => `• ${i.label}`).join("\n")}` : "",
     partial ? "" : "The batch is NOT released: that's for the Finance Head after reviewing the holds.",
   ].filter(Boolean);
   const text = out.join("\n\n");

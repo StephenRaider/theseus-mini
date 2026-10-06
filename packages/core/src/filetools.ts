@@ -1,3 +1,4 @@
+import { AlignmentType, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import ExcelJS from "exceljs";
 import { extractText, getDocumentProxy } from "unpdf";
 import { z } from "zod";
@@ -94,5 +95,60 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
       return { path: used };
     },
   };
-  return [list, read, save];
+  const saveDocx: Tool<DocxInput> = {
+    name: "files.save_docx",
+    description: "Save a NEW Word document (.docx) in the workspace from headings, paragraphs, bullet lists and tables (never overwrites)",
+    risk: "write",
+    idempotent: false,
+    input: DocxInput,
+    output: "{ path }",
+    async run(doc, ctx) {
+      const rel = doc.path.toLowerCase().endsWith(".docx") ? doc.path : `${doc.path}.docx`;
+      const used = await sandbox.writeNew(rootId, rel, await buildDocx(doc)).catch(sandboxFailure);
+      ctx.evidence({ kind: "document", summary: `Saved ${used}`, source: `file:${used}`, ref: used });
+      return { path: used };
+    },
+  };
+  return [list, read, save, saveDocx];
+}
+
+/* ------------------------------------------------------------------ Word documents */
+
+export const DocxBlock = z.object({
+  kind: z.enum(["heading", "paragraph", "bullets", "table"]),
+  text: z.string().optional().describe("heading / paragraph text"),
+  items: z.array(z.string()).optional().describe("bullets"),
+  rows: z.array(z.array(z.string())).optional().describe("table rows; first row is the header"),
+});
+export const DocxInput = z.object({
+  path: z.string().describe('Workspace path, e.g. "Drafts/Letter.docx"'),
+  title: z.string().optional(),
+  /** Small grey line under the title, e.g. "Ref: KIPL/VD/2026/014 · 7 Oct 2026". */
+  subtitle: z.string().optional(),
+  blocks: z.array(DocxBlock),
+});
+export type DocxInput = z.infer<typeof DocxInput>;
+
+/** Plain, formal Word layout: title, optional reference line, then the blocks. */
+export async function buildDocx(d: Omit<DocxInput, "path">): Promise<Uint8Array> {
+  const para = (text: string, opts: { bold?: boolean; size?: number; color?: string } = {}) =>
+    new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ text, ...(opts.bold ? { bold: true } : {}), ...(opts.size ? { size: opts.size } : {}), ...(opts.color ? { color: opts.color } : {}) })] });
+  const children: (Paragraph | Table)[] = [];
+  if (d.title) children.push(new Paragraph({ heading: HeadingLevel.TITLE, alignment: AlignmentType.LEFT, children: [new TextRun({ text: d.title })] }));
+  if (d.subtitle) children.push(para(d.subtitle, { color: "666666", size: 20 }));
+  for (const b of d.blocks) {
+    if (b.kind === "heading" && b.text) children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, spacing: { before: 240, after: 120 }, children: [new TextRun({ text: b.text })] }));
+    else if (b.kind === "paragraph" && b.text !== undefined) for (const line of b.text.split("\n")) children.push(para(line));
+    else if (b.kind === "bullets") for (const it of b.items ?? []) children.push(new Paragraph({ bullet: { level: 0 }, children: [new TextRun({ text: it })] }));
+    else if (b.kind === "table" && b.rows?.length) {
+      children.push(
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: b.rows.map((r, i) => new TableRow({ children: r.map((c) => new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: c, ...(i === 0 ? { bold: true } : {}) })] })] })) })),
+        }),
+      );
+      children.push(para(""));
+    }
+  }
+  return new Uint8Array(await Packer.toBuffer(new Document({ sections: [{ children }] })));
 }

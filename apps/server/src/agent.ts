@@ -20,7 +20,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { EventLog } from "@theseus/core";
-import { REPO_ROOT, createHarness, modelFromEnv } from "./harness.ts";
+import { REPO_ROOT, createHarness, modelFromEnv, recorder } from "./harness.ts";
 import { attachPrinter } from "./printer.ts";
 import { scriptedModel } from "./scripted.ts";
 import { inProcessWorld, liveWorld } from "./world.ts";
@@ -43,9 +43,11 @@ const envFile = join(REPO_ROOT, ".env");
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 const world = flag("live-world") ? liveWorld() : await inProcessWorld();
-const model = flag("scripted") ? scriptedModel() : modelFromEnv({ cache: flag("cache") });
 const logFile = opt("log");
-const log = new EventLog(logFile ? { file: logFile } : {});
+// Flight recorder: every event and model call go to .theseus/runs/ (unless --log names a file).
+const rec = recorder("cli");
+const model = rec.trace(flag("scripted") ? scriptedModel() : modelFromEnv({ cache: flag("cache") }));
+const log = logFile ? new EventLog({ file: logFile }) : rec.log;
 const { kernel, employee } = await createHarness({ world, model, log, stepDelayMs: Number(opt("pace") ?? 0) });
 attachPrinter(kernel);
 

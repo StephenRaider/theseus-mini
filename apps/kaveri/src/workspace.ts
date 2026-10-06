@@ -33,12 +33,25 @@ export const WORKSPACE_FILES = {
   outbox: "Outbox",
 } as const;
 
+/** Top-level entries a generated workspace (and the agents working in it) can contain. */
+const OWN_ENTRIES = new Set([MARKER, "Vendor Desk", "Payments", "Outbox", "Drafts", "Attachments", "desktop.ini", ".DS_Store"]);
+
 export async function generateWorkspace(state: KaveriState, dir = DEFAULT_WORKSPACE): Promise<string> {
   if (existsSync(dir)) {
     const entries = await readdir(dir);
-    if (entries.length && !entries.includes(MARKER))
-      throw new Error(`Refusing to reset ${dir}: it isn't a Kaveri workspace (no ${MARKER} marker). Move it away or set KAVERI_WORKSPACE.`);
-    await rm(dir, { recursive: true, force: true });
+    // Ours if it has the marker, or (a reset that was interrupted) only folders we create ourselves.
+    const ours = entries.includes(MARKER) || entries.every((e) => OWN_ENTRIES.has(e));
+    if (!ours) throw new Error(`Refusing to reset ${dir}: it isn't a Kaveri workspace (no ${MARKER} marker). Move it away or set KAVERI_WORKSPACE.`);
+    // Empty it but keep the folder itself (the app may be watching it), the user's attachments and the
+    // marker (so a reset that fails half-way still recognises the folder next time).
+    const stuck: string[] = [];
+    for (const e of entries) {
+      if (e === "Attachments" || e === MARKER) continue;
+      // Windows: a folder being watched, or a file open in Excel/Word, can refuse deletion for a moment.
+      await rm(join(dir, e), { recursive: true, force: true, maxRetries: 8, retryDelay: 150 }).catch(() => stuck.push(e));
+    }
+    if (stuck.length)
+      throw new Error(`Couldn't clear ${stuck.join(", ")} in the workspace. Is a file from it open in Excel, Word or a PDF viewer? Close it and press ↻ again.`);
   }
   for (const d of [WORKSPACE_FILES.biddersDir, WORKSPACE_FILES.batchDir, WORKSPACE_FILES.outbox, "Vendor Desk/Policies", "Vendor Desk/Templates"])
     await mkdir(join(dir, d), { recursive: true });

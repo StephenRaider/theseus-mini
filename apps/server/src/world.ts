@@ -39,7 +39,7 @@ export async function inProcessWorld(opts: { workspaceDir?: string | "temp" } = 
       headers: (init?.headers ?? {}) as Record<string, string>,
       ...(init?.body !== undefined ? { payload: init.body as string } : {}),
     });
-    return new Response(res.rawPayload, { status: res.statusCode, headers: res.headers as Record<string, string> });
+    return new Response(new Uint8Array(res.rawPayload), { status: res.statusCode, headers: res.headers as Record<string, string> });
   }) as typeof fetch;
 
   return { mode: "inprocess", urls: urlsOf(), fetch: injectFetch, workspaceDir, today: TODAY, kaveri };

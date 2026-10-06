@@ -37,13 +37,18 @@ import {
   fillArgs,
   getPath,
   interpolate,
+  normalizeProgram,
+  pathResolves,
+  programPaths,
   validateProgram,
   type ProgramStep,
 } from "./program.ts";
 import {
+  DraftDoc,
   RouteDecision,
   Summary,
   composePrompt,
+  draftPrompt,
   roleIntro,
   routePrompt,
   summaryPrompt,
@@ -165,6 +170,19 @@ export interface PackRuntime {
   holdCall?(item: PlanItem, reason: string, shared: Record<string, any>): { tool: string; input: unknown } | undefined;
   verify?: Record<string, (ctx: PackCtx & { plan: Plan }) => Promise<VerifyResult[]>>;
   report?: Record<string, (ctx: PackCtx & { plan: Plan }) => string | Promise<string>>;
+  /**
+   * Find what the records say about a subject the user named ("Bhadra Concrete
+   * Works", "T-2026-14"), for drafting documents. null + suggestions if not found.
+   */
+  lookup?(subject: string, ctx: PackCtx, depth?: "letter" | "full"): Promise<{ found: LookupResult | null; suggestions: string[] }>;
+}
+
+export interface LookupResult {
+  label: string;
+  kind: string;
+  facts: Record<string, unknown>;
+  /** A readable profile ("full" lookups): shown to the user as is. */
+  profile?: string;
 }
 
 /* =====================================================================
@@ -280,10 +298,10 @@ export class Kernel {
   }
 
   /** A message from you to an employee: a new task if idle, otherwise handled by the conversation lane. */
-  send(employeeId: string, text: string): Promise<void> {
+  send(employeeId: string, text: string, opts: { from?: Actor } = {}): Promise<void> {
     return this.track(async () => {
       const st = this.mustEmployee(employeeId);
-      this.post(employeeId, "user", text, st.current?.task.id);
+      this.post(employeeId, opts.from ?? "user", text, st.current?.task.id);
       const open = this.openQuestionsOf(employeeId);
       if (!st.current) {
         if (open.length) return this.answerQuestion(open[0]!.id, text, "user");
@@ -320,7 +338,9 @@ export class Kernel {
                 : cmd.action === "release"
                   ? { op: "release_item", itemId: cmd.itemId }
                   : { op: "retry_item", itemId: cmd.itemId, ...(cmd.fromStepId ? { fromStepId: cmd.fromStepId } : {}) };
-          run.queue.push({ patch, actor: "user" });
+          const item = run.plan?.items.find((i) => i.id === cmd.itemId);
+          // Holding from the grid also holds it in the real system (protective, never blocked).
+          run.queue.push({ patch, actor: "user", ...(cmd.action === "hold" && item ? { then: () => this.protectiveHold(run, item, `You held it: ${reason}`) } : {}) });
           run.wake();
           return;
         }
@@ -352,6 +372,11 @@ export class Kernel {
     });
   }
 
+  /** Post a chat message from someone other than an employee (e.g. Theseus, the manager). */
+  postMessage(threadId: string, from: Actor, text: string, taskId?: string) {
+    this.post(threadId, from, text, taskId);
+  }
+
   /** Resolves when nothing is actively running (every task is done or waiting for you). */
   settled(): Promise<void> {
     if (this.busy === 0) return Promise.resolve();
@@ -373,11 +398,10 @@ export class Kernel {
     if (!run.plan) return `${run.task.status}: ${run.task.goal ?? run.task.request}`;
     const sum = summarize(run.plan);
     const total = run.plan.items.length;
-    const finished = sum.done + sum.skipped + sum.failed;
-    const parts = [`${finished}/${total} ${run.playbook?.item.plural ?? run.program?.itemKind ?? "items"} finished`];
-    if (sum.held) parts.push(`${sum.held} held`);
-    if (sum.needs_you) parts.push(`${sum.needs_you} need you`);
-    if (sum.failed) parts.push(`${sum.failed} failed`);
+    const checked = sum.done + sum.skipped + sum.failed + sum.held + sum.needs_you;
+    const noun = run.playbook?.item.plural ?? (run.program ? `${run.program.itemKind}s` : "items");
+    const breakdown = [sum.done ? `${sum.done} done` : "", sum.held ? `${sum.held} held` : "", sum.needs_you ? `${sum.needs_you} need you` : "", sum.failed ? `${sum.failed} failed` : "", sum.skipped ? `${sum.skipped} skipped` : ""].filter(Boolean);
+    const parts = [`${checked}/${total} ${noun} checked${breakdown.length ? ` (${breakdown.join(", ")})` : ""}`];
     const cur = run.plan.items.find((i) => run.plan!.steps.some((s) => run.plan!.cells[i.id]![s.id]!.state === "running"));
     if (cur) parts.push(`working on ${cur.label}`);
     if (run.paused) parts.push("paused");
@@ -411,19 +435,19 @@ export class Kernel {
     return st;
   }
 
-  private post(employeeId: string, from: Actor, text: string, taskId?: string) {
+  private post(employeeId: string, from: Actor, text: string, taskId?: string, attachments: { name: string; mime: string; ref: string }[] = []) {
     this.emit(
       {
         type: "message.posted",
-        payload: { id: this.ids.next("msg"), threadId: employeeId, from, text, attachments: [], ...(taskId ? { taskId } : {}), ts: this.log.now },
+        payload: { id: this.ids.next("msg"), threadId: employeeId, from, text, attachments, ...(taskId ? { taskId } : {}), ts: this.log.now },
       },
       from,
       { employeeId, ...(taskId ? { taskId } : {}) },
     );
   }
 
-  private say(run: TaskRun, text: string) {
-    this.post(run.employeeId, `employee:${run.employeeId}`, text, run.task.id);
+  private say(run: TaskRun, text: string, attachments: { name: string; mime: string; ref: string }[] = []) {
+    this.post(run.employeeId, `employee:${run.employeeId}`, text, run.task.id, attachments);
   }
 
   private setEmployee(st: EmployeeState, changes: Partial<Employee>) {
@@ -545,15 +569,21 @@ export class Kernel {
     this.emit({ type: "task.created", payload: task }, "user", { employeeId: st.employee.id, taskId });
     this.setEmployee(st, { status: "working", currentTaskId: taskId });
 
-    const loop = this.track(() => this.runTask(run)).catch((e) => {
-      this.say(run, `I hit an internal error and stopped this task: ${(e as Error).message}`);
-      this.setStatus(run, "failed", (e as Error).message);
+    const loop = this.track(async () => {
+      try {
+        await this.runTask(run);
+      } catch (e) {
+        this.say(run, `I hit an internal error and stopped this task: ${(e as Error).message}`);
+        this.setStatus(run, "failed", (e as Error).message);
+      } finally {
+        // Free the employee BEFORE settled() resolves, so the next message starts a new task.
+        if (st.current === run) st.current = undefined;
+        if (st.employee.currentTaskId === taskId) this.setEmployee(st, { status: "idle" });
+      }
     });
     this.loops.add(loop);
     void loop.finally(() => {
       this.loops.delete(loop);
-      if (st.current === run) st.current = undefined;
-      if (st.employee.currentTaskId === taskId) this.setEmployee(st, { status: "idle" });
       const next = st.backlog.shift();
       if (next) this.track(async () => this.startTask(st, next));
     });
@@ -572,6 +602,9 @@ export class Kernel {
   }
 
   private async runTask(run: TaskRun) {
+    // Answer at once, before the (slower) model call: a person says "on it" first
+    // (not for "what can you do?", which is answered straight away anyway).
+    if (!isAboutMe(run.task.request)) this.say(run, acknowledge(run.task.request, run.task.id));
     const ok = await this.understandAndPlan(run);
     if (!ok) return;
     this.setStatus(run, "running");
@@ -602,6 +635,7 @@ export class Kernel {
     }
     if (run.cancelled) {
       this.closeQuestions(run);
+      if (run.plan) this.say(run, `Stopped as you asked. Where it stands: ${this.status(run.task.id)} Nothing else will be changed; what's done stays done.`);
       this.setStatus(run, "cancelled", "cancelled by you");
       return;
     }
@@ -612,6 +646,11 @@ export class Kernel {
 
   private async understandAndPlan(run: TaskRun): Promise<boolean> {
     const pack = this.pack;
+    // "What can you do?" needs no model call and no records.
+    if (isAboutMe(run.task.request)) {
+      this.finishWithAnswer(run, "Explain what I can do", this.aboutMe());
+      return false;
+    }
     const call = this.packCtx(run).call;
     const index = await pack.orient({ request: run.task.request, call });
     const offered = [...pack.playbooks.values()].filter((p) => pack.handlers[p.id]);
@@ -652,6 +691,22 @@ export class Kernel {
       this.say(run, decision.refusal ?? "That's outside what I do in this role, so I'll leave it with you.");
       this.updateTask(run, { goal: decision.goal });
       this.setStatus(run, "cancelled", "out of scope");
+      return false;
+    }
+    if (decision.mode === "about_me") {
+      this.finishWithAnswer(run, decision.goal, this.aboutMe());
+      return false;
+    }
+    if (decision.mode === "answer" && decision.answer?.trim()) {
+      this.finishWithAnswer(run, decision.goal, `${decision.answer.trim()}\n\n(That's general knowledge of the job, not something I checked in our records.)`);
+      return false;
+    }
+    if (decision.mode === "lookup" && decision.lookup?.subjects.length && this.pack.lookup) {
+      await this.lookupSubjects(run, decision);
+      return false;
+    }
+    if (decision.mode === "draft" || (decision.draft && !decision.playbookId)) {
+      await this.draftDocument(run, decision);
       return false;
     }
 
@@ -713,12 +768,12 @@ export class Kernel {
       return true;
     }
 
-    // Tier 3: compose a program from tools.
-    const program = await this.compose(run, index, decision.goal);
-    if (!program) return false;
+    // Tier 3: compose a program from tools, try it on a few items, fix it if it reads the wrong fields.
+    const composed = await this.compose(run, index, decision.goal);
+    if (!composed) return false;
+    const { program, items } = composed;
     run.program = program;
-    const items = await this.programItems(run, program);
-    if (!items) return false;
+    assumptions.push(...composed.notes);
     run.plan = createPlan({ taskId: run.task.id, playbookId: "composed", playbookVersion: 1, steps: program.steps.map((s) => ({ id: s.id, title: s.title.slice(0, 24) })) });
     this.emitOrient(run, index, decision, assumptions);
     this.updateTask(run, {
@@ -780,30 +835,211 @@ export class Kernel {
     }
     if (filter?.length) {
       const picked = items.filter((it) => filter.some((f) => matchesItem(it, f)));
-      if (picked.length) items = picked;
-      else this.say(run, `I couldn't match "${filter.join(", ")}" to specific items, so I'm doing all ${items.length}.`);
+      if (!picked.length) {
+        // Never widen a request: doing ALL items when the user named one could change records they never asked about.
+        this.say(
+          run,
+          `You named ${filter.map((f) => `"${f}"`).join(", ")}, but that isn't one of the items this job covers (${items.slice(0, 8).map((i) => i.label).join(", ")}${items.length > 8 ? ", …" : ""}). I haven't started anything. Tell me which one you meant, or ask in other words.`,
+        );
+        this.setStatus(run, "failed", "named item not found");
+        return null;
+      }
+      items = picked;
     }
     return items;
   }
 
-  private async compose(run: TaskRun, index: OrientIndex, goal: string): Promise<Program | null> {
+  private finishWithAnswer(run: TaskRun, goal: string, text: string) {
+    this.updateTask(run, { goal });
+    this.say(run, text);
+    this.setStatus(run, "done");
+  }
+
+  /** "What can you do?", answered from the role pack itself, so it is always true. */
+  aboutMe(): string {
+    const m = this.pack.manifest;
+    const pbs = [...this.pack.playbooks.values()].filter((p) => this.pack.handlers[p.id]);
+    const tools = this.gateway.describe();
+    const lines = [
+      `I'm a ${m.name}${m.company ? ` at ${m.company.replace(/\s*\(fictional\)/i, "")}` : ""}. What I do:`,
+      ...m.scope.does.map((d) => `• ${d.charAt(0).toUpperCase()}${d.slice(1)}`),
+      "",
+      "Procedures I know by heart:",
+      ...pbs.map((p) => `• ${p.title}: ${p.steps.map((s) => s.title).join(" → ")}`),
+      "",
+      `For related jobs no procedure covers, I put a plan together from my ${tools.length} tools (inbox, eProcure, ERP, GST and Udyam lookups, bank checks, files) and try it on a few items before running it.`,
+      "",
+      "How I work: I look around first (inbox, tenders, payment batches, files), tell you how I'll handle it and what I assumed, then go item by item. Anything that can't be undone, like activating a vendor or sending an email, waits for your OK. You can message me while I work (\"hold Malnad\", \"how far are you?\") and I keep going. At the end I re-check the results on a fresh read and report.",
+      "",
+      `What I don't do: ${m.scope.does_not.join("; ")}.`,
+    ];
+    return lines.join("\n");
+  }
+
+  /** mode=lookup: "everything on Malnad", read live from every system by the pack; no plan, no extra model call. */
+  private async lookupSubjects(run: TaskRun, decision: RouteDecision) {
+    this.updateTask(run, { goal: decision.goal, tier: 3 });
+    const parts: string[] = [];
+    for (const subject of decision.lookup!.subjects) {
+      const r = await this.pack.lookup!(subject, this.packCtx(run), "full").catch((e: Error) => ({ found: null, suggestions: [], error: e.message }));
+      if (r.found) parts.push(r.found.profile ?? `${r.found.label}:\n${Object.entries(r.found.facts).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`).join("\n")}`);
+      else parts.push(`I couldn't find "${subject}" in our records${r.suggestions.length ? `. Did you mean ${r.suggestions.join(" or ")}?` : "."}`);
+    }
+    this.say(run, parts.join("\n\n"));
+    this.setStatus(run, "done");
+  }
+
+  /** mode=draft: look up the subjects, write the document once, save it as a NEW Word file, send nothing. */
+  private async draftDocument(run: TaskRun, decision: RouteDecision) {
+    const ask = decision.draft ?? { document: decision.goal, subjects: [] };
+    this.updateTask(run, { goal: decision.goal, tier: 3, assumptions: decision.assumptions });
+    const facts: LookupResult[] = [];
+    const missing: { subject: string; suggestions: string[] }[] = [];
+    for (const subject of ask.subjects) {
+      const r = this.pack.lookup ? await this.pack.lookup(subject, this.packCtx(run)).catch(() => ({ found: null, suggestions: [] })) : { found: null, suggestions: [] };
+      if (r.found) facts.push(r.found);
+      else missing.push({ subject, suggestions: r.suggestions });
+    }
+    if (missing.length) {
+      this.say(
+        run,
+        `I couldn't find ${missing.map((m) => `"${m.subject}"${m.suggestions.length ? ` (closest: ${m.suggestions.join(", ")})` : ""}`).join(" or ")} in our records, so I haven't written anything. A letter about a party we can't find would have to be made up. Tell me who you meant.`,
+      );
+      this.setStatus(run, "failed", "subject not found");
+      return;
+    }
+    this.say(run, `Writing ${ask.document}${facts.length ? ` for ${facts.map((f) => f.label).join(", ")}` : ""}, from our records.`);
+    let doc: DraftDoc;
+    try {
+      doc = await this.json(
+        "draft",
+        this.system(run),
+        draftPrompt({ request: run.task.request, document: ask.document, today: this.pack.today(), sender: `Vendor Desk, ${(this.pack.manifest.company ?? "the company").replace(/\s*\(fictional\)/i, "")}`, facts }),
+        DraftDoc,
+        run.task.id,
+      );
+    } catch (e) {
+      this.say(run, `I couldn't write it: ${modelProblem(e)}`);
+      this.setStatus(run, "failed", (e as Error).message);
+      return;
+    }
+    const allText = [doc.title, doc.subtitle ?? "", ...doc.blocks.flatMap((b) => [b.text ?? "", ...(b.items ?? []), ...(b.rows ?? []).flat()])].join("\n");
+    const unsupported = unsupportedClaims(allText, `${run.task.request} ${this.pack.today()} ${JSON.stringify(facts)}`);
+    const file = doc.fileName.replace(/[\\/:*?"<>|]+/g, " ").trim() || "Draft.docx";
+    const r = await this.gateway.call("files.save_docx", { path: `Drafts/${file}`, title: doc.title, ...(doc.subtitle ? { subtitle: doc.subtitle } : {}), blocks: doc.blocks }, { employeeId: run.employeeId, taskId: run.task.id });
+    if (!r.ok) {
+      this.say(run, `I wrote it but couldn't save it: ${r.error.message}`);
+      this.setStatus(run, "failed", r.error.message);
+      return;
+    }
+    const path = (r.data as { path: string }).path;
+    const placeholders = [...new Set(allText.match(/\[[^\]]{2,40}\]/g) ?? [])];
+    // Today's date belongs on the letter, not in its claims ("effective from <today>").
+    const body = doc.blocks.flatMap((b) => [b.text ?? "", ...(b.items ?? []), ...(b.rows ?? []).flat()]).join("\n");
+    if (dateForms(this.pack.today()).some((f) => body.includes(f))) unsupported.push(`today's date used in the text (${this.pack.today()}); is that really when it happened?`);
+    this.say(
+      run,
+      [
+        `Done: "${doc.title}" is saved as ${path}. Open it to review.`,
+        placeholders.length ? `Fill in before it goes out: ${placeholders.join(", ")}.` : "",
+        unsupported.length ? `Check these, they aren't in our records: ${unsupported.join(", ")}.` : "",
+        "Nothing has been sent. If you want it emailed, tell me; sending needs your OK.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      [{ name: path.split("/").pop()!, mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ref: `workspace:${path}` }],
+    );
+    this.setStatus(run, "done");
+  }
+
+  /**
+   * Tier 3. The model writes a program; the kernel checks it statically, lists
+   * the items, then does a TRIAL RUN of the read steps on up to three items and
+   * checks every field the program reads really exists in what the tools return.
+   * If not, the model gets one or two chances to fix it, shown the real data.
+   * Extra model calls happen only when the first program is broken.
+   */
+  private async compose(run: TaskRun, index: OrientIndex, goal: string): Promise<{ program: Program; items: PlanItem[]; notes: string[] } | null> {
     const tools = this.gateway.describe((t) => t.risk !== "irreversible");
     let problems: string[] = [];
-    for (let attempt = 0; attempt < 2; attempt++) {
+    let samples: string | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
       let p: Program;
       try {
-        p = await this.json("compose", this.system(run), composePrompt({ request: run.task.request, goal, index, tools, problems }), Program, run.task.id);
+        p = await this.json("compose", this.system(run), composePrompt({ request: run.task.request, goal, index, tools, problems, ...(samples ? { samples } : {}) }), Program, run.task.id);
       } catch (e) {
         this.say(run, `I couldn't put together a plan for this: ${modelProblem(e)}`);
         this.setStatus(run, "failed", (e as Error).message);
         return null;
       }
+      const { notes } = normalizeProgram(p);
       problems = validateProgram(p, this.gateway);
-      if (!problems.length) return p;
+      if (problems.length) continue;
+      run.itemData.clear();
+      const items = await this.programItems(run, p);
+      if (!items) return null;
+      if (!items.length) return { program: p, items, notes };
+      const probe = await this.probeProgram(run, p, items);
+      if (!probe.problems.length) return { program: p, items, notes };
+      problems = probe.problems;
+      samples = probe.samples;
+      if (attempt < 2) this.say(run, `A trial run on a few items showed my plan was reading the wrong data (${problems[0]}). Fixing it before I start.`);
     }
-    this.say(run, `The plan I composed wasn't safe or valid, so I stopped: ${problems.join("; ")}`);
+    this.say(run, `I couldn't compose a plan that works on the real data, so I stopped rather than give you a wrong answer: ${problems.join("; ")}`);
     this.setStatus(run, "failed", problems.join("; "));
     return null;
+  }
+
+  /** Run the READ steps of a program on up to three items and check its paths against the real outputs. */
+  private async probeProgram(run: TaskRun, p: Program, items: PlanItem[]): Promise<{ problems: string[]; samples: string }> {
+    const ctx = { employeeId: run.employeeId, taskId: run.task.id };
+    const picks = [...new Set([items[0]!, items[Math.floor(items.length / 2)]!, items[items.length - 1]!])];
+    const problems: string[] = [];
+    const scopes: { item: unknown; steps: Record<string, unknown>; params: unknown }[] = [];
+    let ranSteps = 0;
+    for (const it of picks) {
+      const scope = { item: run.itemData.get(it.id)?.element, steps: {} as Record<string, unknown>, params: run.params };
+      let n = 0;
+      for (const st of p.steps) {
+        if (this.gateway.get(st.tool)?.risk !== "read") break;
+        const prepared = this.programArgs(st, scope);
+        if ("missing" in prepared) break; // this item lacks the data (e.g. no GSTIN): not the plan's fault
+        const args = prepared.args;
+        let r = await this.gateway.call(st.tool, args, ctx);
+        if (!r.ok && r.error.class === "validation") r = await this.gateway.call(st.tool, coerceArgs(args), ctx);
+        if (!r.ok) {
+          problems.push(`step "${st.id}" failed on ${it.label}: ${r.error.message}`);
+          break;
+        }
+        scope.steps[st.id] = r.data;
+        n++;
+      }
+      ranSteps = Math.max(ranSteps, n);
+      scopes.push(scope);
+    }
+    if (picks.every((it) => it.id.startsWith("item_"))) problems.push(`items.idPath "${p.items.idPath}" isn't in the listed items`);
+    for (const { path, where, cond, stepIndex } of programPaths(p)) {
+      const stepId = path.startsWith("steps.") ? path.split(".")[1]!.replace(/\[\]$/, "") : undefined;
+      if (stepId && p.steps.findIndex((s) => s.id === stepId) >= ranSteps) continue; // not tried (a write step)
+      if (stepIndex > ranSteps && !where.startsWith("column")) continue;
+      const res = scopes.map((sc) => pathResolves(sc, path));
+      if (res.length && res.every((r) => r === false)) {
+        problems.push(`${where}: "${path}" doesn't exist in the data`);
+        continue;
+      }
+      if (cond && !cond.agg && !["exists", "missing", "contains", "not_contains"].includes(cond.op) && scopes.some((sc) => Array.isArray(getPath(sc, path)))) {
+        problems.push(`${where}: "${path}" is a list; add agg (max = latest, min = earliest, count = how many)`);
+      }
+    }
+    const clip = (v: unknown, n: number) => {
+      const t = JSON.stringify(v);
+      return t.length > n ? `${t.slice(0, n)}…` : t;
+    };
+    const first = scopes[0];
+    const samples = first
+      ? [`item (one element of the list): ${clip(first.item, 700)}`, ...Object.entries(first.steps).map(([id, out]) => `steps.${id}: ${clip(out, 900)}`)].join("\n")
+      : "";
+    return { problems, samples };
   }
 
   private async programItems(run: TaskRun, p: Program): Promise<PlanItem[] | null> {
@@ -1090,10 +1326,26 @@ export class Kernel {
     };
   }
 
+  /** Fill a program step's args; empty optional args are left out, empty required ones reported. */
+  private programArgs(step: ProgramStep, scope: unknown): { args: Record<string, unknown> } | { missing: string[] } {
+    const args = fillArgs(step.args, scope);
+    const shape = (this.gateway.get(step.tool)?.input as { shape?: Record<string, { safeParse(v: unknown): { success: boolean } }> } | undefined)?.shape ?? {};
+    const missing: string[] = [];
+    for (const [k, tpl] of Object.entries(step.args)) {
+      if (!/\{\{/.test(tpl) || (args[k] != null && args[k] !== "")) continue;
+      if (shape[k]?.safeParse(undefined).success) delete args[k];
+      else missing.push(/\{\{\s*([^}]+?)\s*\}\}/.exec(tpl)![1]!.split(".").pop()!.replace(/\[\]$/, ""));
+    }
+    return missing.length ? { missing } : { args };
+  }
+
   private programHandler(step: ProgramStep): StepHandler {
     return async (ctx) => {
       const scope = { item: ctx.data.element, steps: (ctx.data.steps ??= {}) as Record<string, unknown>, params: ctx.params };
-      const args = fillArgs(step.args, scope);
+      const prepared = this.programArgs(step, scope);
+      // A field the item doesn't have (no GSTIN on record) is a finding, not a crash.
+      if ("missing" in prepared) throw new StepFailure({ class: "not_found", message: `Couldn't check: no ${prepared.missing.join(", ")} on record` });
+      const args = prepared.args;
       let r = await ctx.tryCall(step.tool, args);
       if (!r.ok && r.error.class === "validation") r = await ctx.tryCall(step.tool, coerceArgs(args));
       if (!r.ok) throw new StepFailure(r.error, r.blockedBy);
@@ -1168,7 +1420,7 @@ export class Kernel {
         return ack("Resuming.");
       case "stop":
         this.control(run, "cancel");
-        return ack("Stopping this task. Nothing further will be changed; what's done so far stays done.");
+        return ack("Stopping now.");
       case "new_task":
         st.backlog.push(text);
         return ack("I'll take that up as soon as the current task is finished.");
@@ -1296,13 +1548,7 @@ export class Kernel {
 
   private answerFromState(run: TaskRun, text: string): string {
     const it = run.plan?.items.find((i) => matchesItem(i, text, true));
-    if (it && run.plan) {
-      const cells = run.plan.steps.map((s) => {
-        const c = run.plan!.cells[it.id]![s.id]!;
-        return `${s.title}: ${c.state.replace("_", " ")}${c.note ? ` (${c.note})` : ""}`;
-      });
-      return `${it.label}: ${itemStatus(run.plan, it.id).replace("_", " ")}${it.holdReason ? `, held because ${it.holdReason}` : ""}. ${cells.join(" · ")}`;
-    }
+    if (it && run.plan) return describeItem(run.plan, it);
     return this.status(run.task.id);
   }
 
@@ -1341,7 +1587,7 @@ export class Kernel {
     let results: VerifyResult[] = [];
     try {
       const v = run.playbook ? this.pack.verify?.[run.playbook.id] : undefined;
-      results = v ? await v(ctx) : genericVerify(plan);
+      results = v ? await v(ctx) : run.program ? await this.verifyProgram(run) : genericVerify(plan);
     } catch (e) {
       results = [{ criterion: "Verification", verdict: "uncertain", detail: `The verifier couldn't run: ${(e as Error).message}` }];
     }
@@ -1368,23 +1614,106 @@ export class Kernel {
     this.setStatus(run, "done");
   }
 
+  /**
+   * Verifier for composed plans (they have no hand-written verifier):
+   * 1. every item was handled; 2. every condition could actually be read on
+   * the items (a missing field means the answer can't be trusted); 3. a fresh
+   * re-read of a few items, flagged and not, gives the same verdict.
+   */
+  private async verifyProgram(run: TaskRun): Promise<VerifyResult[]> {
+    const p = run.program!;
+    const plan = run.plan!;
+    const today = this.pack.today();
+    const results = genericVerify(plan);
+    const done = plan.items.filter((it) => run.itemData.get(it.id)?.steps && Object.keys(run.itemData.get(it.id)!.steps!).length);
+    const unreadable: string[] = [];
+    for (const st of p.steps)
+      for (const c of st.flagIf ?? []) {
+        const tried = done.filter((it) => (run.itemData.get(it.id)!.steps as Record<string, unknown>)[st.id] !== undefined);
+        const bad = tried.filter((it) => pathResolves({ item: run.itemData.get(it.id)!.element, steps: run.itemData.get(it.id)!.steps }, c.path) === false);
+        if (tried.length && bad.length === tried.length) unreadable.push(`"${c.path}" was missing on every item`);
+        else if (bad.length) unreadable.push(`"${c.path}" was missing on ${bad.length} of ${tried.length} items`);
+      }
+    const nFlagged = done.filter((it) => run.itemData.get(it.id)!.flags?.length).length;
+    if (done.length >= 10 && nFlagged / done.length > 0.8)
+      results.push({
+        criterion: "The result is plausible",
+        verdict: "uncertain",
+        detail: `${nFlagged} of ${done.length} were flagged; when almost everything matches, the check itself is often wrong. Spot-check a few before acting on it`,
+      });
+    results.push({
+      criterion: "Every condition could be read",
+      verdict: unreadable.length ? "fail" : "pass",
+      detail: unreadable.length ? `${unreadable.join("; ")}, so those results can't be trusted` : "every field the plan checks was present",
+    });
+    if (p.steps.every((st) => this.gateway.get(st.tool)?.risk === "read") && done.length) {
+      const flagged = done.filter((it) => run.itemData.get(it.id)!.flags?.length);
+      const clean = done.filter((it) => !run.itemData.get(it.id)!.flags?.length);
+      const sample = [...flagged.slice(0, 2), ...clean.slice(0, 2)];
+      const ctx = { employeeId: run.employeeId, taskId: run.task.id };
+      const disagree: string[] = [];
+      for (const it of sample) {
+        const scope = { item: run.itemData.get(it.id)!.element, steps: {} as Record<string, unknown>, params: run.params };
+        let hit = false;
+        for (const st of p.steps) {
+          const prepared = this.programArgs(st, scope);
+          if ("missing" in prepared) break;
+          const args = prepared.args;
+          let r = await this.gateway.call(st.tool, args, ctx);
+          if (!r.ok && r.error.class === "validation") r = await this.gateway.call(st.tool, coerceArgs(args), ctx);
+          if (!r.ok) break;
+          scope.steps[st.id] = r.data;
+          if (anyTrue(st.flagIf, scope, today)) hit = true;
+        }
+        if (hit !== !!run.itemData.get(it.id)!.flags?.length) disagree.push(it.label);
+      }
+      results.push({
+        criterion: "A fresh re-read agrees",
+        verdict: disagree.length ? "fail" : "pass",
+        detail: disagree.length ? `different result on re-read for ${disagree.join(", ")}` : `re-checked ${sample.length} item(s) (${Math.min(2, flagged.length)} flagged, ${Math.min(2, clean.length)} not): same result`,
+      });
+    }
+    return results;
+  }
+
   private async programReport(run: TaskRun): Promise<string> {
     const p = run.program!;
     const plan = run.plan!;
     const rows = plan.items.map((it) => {
       const d = run.itemData.get(it.id) ?? {};
       const scope = { item: d.element, steps: d.steps ?? {} };
-      const row: Record<string, unknown> = { id: it.id, label: it.label, status: itemStatus(plan, it.id) };
+      const st = itemStatus(plan, it.id);
+      // The grid's own "done" is not a fact about the vendor; only unusual outcomes are worth mentioning.
+      const row: Record<string, unknown> = { id: it.id, label: it.label, ...(st !== "done" ? { outcome: st === "failed" ? "could not be checked" : st.replace("_", " ") } : {}) };
       for (const c of p.columns) row[c.title] = getPath(scope, c.path);
       if (d.flags?.length) row.flags = d.flags;
       return row;
     });
     const flagged = rows.filter((r) => r.flags);
+    const failed = plan.items.filter((it) => itemStatus(plan, it.id) === "failed");
     const table = flagged.length ? flagged : rows.slice(0, 40);
-    const fallback = `${p.title}: ${flagged.length} of ${rows.length} flagged.${flagged.length ? `\n${flagged.map((r) => `• ${r.label}: ${(r.flags as string[]).join("; ")}`).join("\n")}` : ""}`;
+    const hasChecks = p.steps.some((s) => s.flagIf?.length);
+    const details = (r: Record<string, unknown>) =>
+      p.columns
+        .map((c) => {
+          const v = r[c.title];
+          return v == null || v === "" ? "" : `${c.title}: ${typeof v === "object" ? JSON.stringify(v).slice(0, 120) : String(v)}`;
+        })
+        .filter(Boolean)
+        .join(" · ");
+    const failedLines = failed.length
+      ? `\nCouldn't check ${failed.length}:\n${failed
+          .slice(0, 15)
+          .map((it) => `• ${it.label}: ${plan.steps.map((s) => plan.cells[it.id]![s.id]!.note).filter(Boolean).pop() ?? "failed"}`)
+          .join("\n")}${failed.length > 15 ? `\n… and ${failed.length - 15} more` : ""}`
+      : "";
+    const fallback =
+      !hasChecks || rows.length <= 3
+        ? `${p.title}:\n${rows.map((r) => `• ${r.label}${details(r) ? `: ${details(r)}` : ""}${r.flags ? ` ⚠ ${(r.flags as string[]).join("; ")}` : ""}`).join("\n")}${failedLines}`
+        : `${p.title}: ${flagged.length} of ${rows.length} flagged.${flagged.length ? `\n${flagged.map((r) => `• ${r.label}: ${(r.flags as string[]).join("; ")}`).join("\n")}` : ""}${failedLines}`;
     try {
-      const s = await this.json("summary", this.system(run), summaryPrompt({ request: run.task.request, table, flagged: flagged.length, total: rows.length }), Summary, run.task.id);
-      const unsupported = unsupportedClaims(s.summary, JSON.stringify(rows));
+      const s = await this.json("summary", this.system(run), summaryPrompt({ request: run.task.request, table, flagged: flagged.length, total: rows.length, checks: hasChecks }), Summary, run.task.id);
+      const unsupported = unsupportedClaims(s.summary, `${run.task.request} ${flagged.length} of ${rows.length} ${JSON.stringify(rows)}`);
       if (unsupported.length) return `${fallback}\n(I dropped a drafted summary because it mentioned things not in the results: ${unsupported.join(", ")}.)`;
       return `${s.summary}\n\n${fallback}`;
     } catch {
@@ -1421,6 +1750,65 @@ function completeOrder(plan: Plan, first: string[]): string[] {
   return [...set, ...plan.items.map((i) => i.id).filter((id) => !set.has(id))];
 }
 
+/** "2026-10-07" → the ways a letter might write it. */
+export function dateForms(iso: string): string[] {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return [iso];
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const day = d.getUTCDate();
+  const m = months[d.getUTCMonth()]!;
+  const y = d.getUTCFullYear();
+  const dd = String(day).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return [iso, `${day} ${m} ${y}`, `${dd} ${m} ${y}`, `${m} ${day}, ${y}`, `${dd}/${mm}/${y}`, `${dd}.${mm}.${y}`, `${dd}-${mm}-${y}`];
+}
+
+/** One item, in a sentence or two a person would say ("why is Deccan held?"). */
+export function describeItem(plan: Plan, it: PlanItem): string {
+  const st = itemStatus(plan, it.id);
+  const cells = plan.steps.map((s) => ({ step: s, cell: plan.cells[it.id]![s.id]! }));
+  const notes = cells.filter((c) => c.cell.note && c.cell.state !== "pending").map((c) => c.cell.note!.replace(/^⚑\s*/, ""));
+  const end = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
+  if (it.held) return `${it.label} is held. ${end(it.holdReason ?? notes.at(-1) ?? "No reason was recorded")}`;
+  if (st === "skipped") return `${it.label} was skipped${it.holdReason ? `: ${end(it.holdReason)}` : ", as you asked."}`;
+  if (st === "done") {
+    const extra = notes.filter((n) => !/^(Cleared|All checks passed)/.test(n));
+    return `${it.label} is done${extra.length ? `: ${end(extra.join("; "))}` : ", every check passed."}`;
+  }
+  if (st === "failed" || st === "needs_you") {
+    const c = cells.find((x) => x.cell.state === "failed" || x.cell.state === "needs_you");
+    return `${it.label} ${st === "failed" ? "couldn't be finished" : "needs you"} at ${c?.step.title ?? "a step"}${c?.cell.note ? `: ${end(c.cell.note)}` : "."}`;
+  }
+  const running = cells.find((x) => x.cell.state === "running" || x.cell.state === "retrying");
+  if (running) return `I'm checking ${it.label} right now (${running.step.title}).`;
+  const ahead = plan.items.slice(0, plan.items.indexOf(it)).filter((x) => ["pending", "running"].includes(itemStatus(plan, x.id)) && !x.held).length;
+  return `${it.label} isn't checked yet${ahead ? `; ${ahead} line${ahead === 1 ? "" : "s"} ahead of it` : "; it's next"}.`;
+}
+
+/** "What can you do / your skills / how do you work": answered without any model call. */
+export function isAboutMe(request: string): boolean {
+  const t = request.toLowerCase();
+  return (
+    /\b(what|which)\b[^.?]{0,25}\b(can|could|do)\s+you\s+(do|help with|handle)\s*(for me\s*)?([?.!,]|$)/.test(t) ||
+    /\byour\s+(skills?|skill ?sets?|capabilities|abilities|speciali[sz]ation|role|job|workflow)\b/.test(t) ||
+    /\bwho are you\b|\bhow do you work\b|\bwhat are you (good at|for)\b/.test(t)
+  );
+}
+
+/**
+ * The instant reply to a new request. Fixed sentences, no model call; picked
+ * by the task id so it varies between tasks but is repeatable in tests.
+ */
+export function acknowledge(request: string, taskId: string): string {
+  const question = /\?\s*$/.test(request) || /^(which|what|who|how|when|where|is|are|do|does|did|can|has|have)\b/i.test(request.trim());
+  const lines = question
+    ? ["Let me find out. I'll check the records first.", "Good question, looking into it now.", "I'll check and come back to you shortly."]
+    : ["On it. I'll look around first, then tell you how I'll go about it.", "Got it, starting now. I'll check what we have first.", "Sure, I'm on it. Give me a moment to look around."];
+  let h = 0;
+  for (const ch of taskId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return lines[h % lines.length]!;
+}
+
 function modelProblem(e: unknown): string {
   if (e instanceof ModelError) {
     if (e.kind === "quota") return "today's model budget is used up";
@@ -1432,7 +1820,7 @@ function modelProblem(e: unknown): string {
 }
 
 function genericVerify(plan: Plan): VerifyResult[] {
-  const open = plan.items.filter((i) => !i.held && plan.steps.some((s) => !isTerminal(plan.cells[i.id]![s.id]!.state) && plan.cells[i.id]![s.id]!.state !== "needs_you"));
+  const open = plan.items.filter((i) => !i.held && ["pending", "running"].includes(itemStatus(plan, i.id)));
   return [
     {
       criterion: "Every item was handled",
@@ -1462,5 +1850,23 @@ export function unsupportedClaims(summary: string, facts: string): string[] {
   const norm = (s: string) => s.replace(/[,\s₹]/g, "").toLowerCase();
   const f = norm(facts);
   const tokens = summary.match(/\b[A-Z]{1,6}[-/][A-Z0-9/-]{2,}\b|\b\d[\d,]{3,}\b/g) ?? [];
-  return [...new Set(tokens)].filter((t) => !f.includes(norm(t)));
+  const out = [...new Set(tokens)].filter((t) => !f.includes(norm(t)));
+  // Counts: "40 vendors" or "forty vendors" must be a number that appears in the results.
+  const nums = new Set((facts.match(/\d+/g) ?? []).map(Number));
+  for (const m of summary.matchAll(/(?<![\d,./₹-])\b(\d{1,3}|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:-(?:one|two|three|four|five|six|seven|eight|nine))?|hundred)\b(?![\d,./-])(?!\s*(?:days?|weeks?|months?|years?|%))/gi)) {
+    const n = /^\d/.test(m[1]!) ? Number(m[1]) : wordToNumber(m[1]!);
+    if (n !== undefined && n > 10 && !nums.has(n)) out.push(m[1]!);
+  }
+  return [...new Set(out)];
+}
+
+function wordToNumber(w: string): number | undefined {
+  const units: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
+  const base: Record<string, number> = {
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+    twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100,
+  };
+  const [a, b] = w.toLowerCase().split("-");
+  const n = base[a!];
+  return n === undefined ? undefined : n + (b ? (units[b] ?? 0) : 0);
 }

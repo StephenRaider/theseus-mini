@@ -448,15 +448,16 @@ export function vendorIntegrityTools(deps: { client: KaveriClient; sandbox: File
     },
     {
       name: "match.find_duplicates",
-      description: "Find existing vendors that may be the same party (same GSTIN / PAN / bank account, or similar name)",
+      description: "Find existing vendors that may be the same party (same GSTIN / PAN / bank account, or similar name). When checking a vendor already in the master, pass its id as excludeId so it doesn't match itself",
       risk: "read",
       idempotent: true,
-      input: z.object({ name: z.string(), pan: z.string().optional(), gstin: z.string().optional(), bankAccount: z.string().optional() }),
+      input: z.object({ name: z.string(), pan: z.string().optional(), gstin: z.string().optional(), bankAccount: z.string().optional(), excludeId: z.string().optional() }),
       output: "{ candidates: [{ id, legalName, score, reasons }] }",
-      async run(probe) {
+      async run({ excludeId, ...probe }) {
         const vs = await client.json<VendorRec[]>("erp", "GET", "/api/vendors?q=");
         dir.rememberVendors(vs);
-        const recs = vs.map((v) => ({ id: v.id, name: v.legalName, pan: v.pan, gstin: v.gstin, bankAccount: v.bank.accountNumber }));
+        // A vendor is never its own duplicate. Only by id: an identical second record IS a duplicate.
+        const recs = vs.filter((v) => v.id !== excludeId).map((v) => ({ id: v.id, name: v.legalName, pan: v.pan, gstin: v.gstin, bankAccount: v.bank.accountNumber }));
         return { candidates: findDuplicates(probe, recs).map((c) => ({ id: c.record.id, legalName: c.record.name, score: Math.round(c.score * 100) / 100, reasons: c.reasons })) };
       },
     },

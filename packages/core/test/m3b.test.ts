@@ -227,5 +227,9 @@ describe("model plumbing", () => {
     const facts = JSON.stringify([{ id: "PBG/SBI/2026/40917", amount: 980000 }]);
     expect(unsupportedClaims("Guarantee PBG/SBI/2026/40917 for 9,80,000 failed", facts)).toEqual([]);
     expect(unsupportedClaims("Guarantee PBG/HDFC/2026/11111 failed", facts)).toEqual(["PBG/HDFC/2026/11111"]);
+    // Counts must be real: the live run that said "forty vendors" when there were 60.
+    const rows = "0 of 60 " + JSON.stringify([{ id: "V-101" }]);
+    expect(unsupportedClaims("The data lists forty vendors; 0 of 60 were flagged.", rows)).toEqual(["forty"]);
+    expect(unsupportedClaims("Sixty vendors checked, none unpaid for 90 days.", rows)).toEqual([]);
   });
 });

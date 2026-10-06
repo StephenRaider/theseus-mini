@@ -8,6 +8,8 @@
  * gracefully (files are listed but can't be opened).
  */
 
+import type { Command, TheseusEvent } from "@theseus/protocol";
+
 export interface BridgeRoot {
   id: string;
   label: string;
@@ -27,7 +29,38 @@ export interface FileChange {
   rel: string;
 }
 
+export type AgentMode = "live" | "demo";
+
+export interface AgentInfo {
+  mode: AgentMode;
+  /** e.g. "gemini:gemini-3.5-flash-lite" or "scripted" */
+  model: string;
+  note?: string;
+  workspaceDir: string;
+  today: string;
+  suggestions: string[];
+}
+
+export interface AgentSnapshot {
+  info: AgentInfo | null;
+  error: string | null;
+  events: TheseusEvent[];
+}
+
+/** The live employees (apps/server/src/host.ts, run by the desktop app in its own process). */
+export interface AgentBridge {
+  init(): Promise<AgentSnapshot>;
+  command(c: Command): Promise<void>;
+  /** Restart with a fresh company world, optionally switching live ↔ demo. */
+  restart(mode?: AgentMode): Promise<AgentSnapshot>;
+  onEvent(cb: (e: TheseusEvent) => void): () => void;
+  onStatus(cb: (s: { info: AgentInfo | null; error: string | null }) => void): () => void;
+  onReset(cb: () => void): () => void;
+}
+
 export interface TheseusBridge {
+  /** Live agents (desktop app only). */
+  agent: AgentBridge;
   readonly isDesktop: true;
   readonly platform: string;
   roots(): Promise<BridgeRoot[]>;

@@ -57,7 +57,7 @@ export function attachPrinter(kernel: Kernel, out: (line: string) => void = (l) 
         out(`${time(e)} ${c.yellow(`? ${e.payload.questionId}`)} ${e.payload.text}${e.payload.default ? c.dim(` (assuming "${e.payload.default}" unless you say otherwise)`) : ""}`);
         break;
       case "constraint.added":
-        out(`${time(e)} ${c.yellow("⛨ standing instruction")} "${e.payload.text}" → protects ${e.payload.subjects.join(", ") || "the named items"}`);
+        out(`${time(e)} ${c.yellow("⛨ standing instruction")} "${e.payload.text}"${readableSubjects(e.payload.subjects, kernel)}`);
         break;
       case "nudge.triaged":
         out(`${time(e)} ${c.dim(`message understood as: ${e.payload.kind}${e.payload.detail ? ` (${e.payload.detail})` : ""} [${e.payload.by}]`)}`);
@@ -75,4 +75,16 @@ export function attachPrinter(kernel: Kernel, out: (line: string) => void = (l) 
         break;
     }
   });
+}
+
+/** "vendor:V-105" → "Malnad Transport Co (V-105)"; internal name keys are dropped. */
+function readableSubjects(subjects: string[], kernel: Kernel): string {
+  const shown = subjects
+    .filter((x) => x.startsWith("vendor:") || x.startsWith("line:"))
+    .map((x) => {
+      const id = x.slice(x.indexOf(":") + 1);
+      const name = (kernel.pack as { directory?: { vendors: Map<string, { legalName: string }> } }).directory?.vendors.get(id)?.legalName;
+      return name ? `${name} (${id})` : id;
+    });
+  return shown.length ? ` → protects ${shown.join(", ")}` : "";
 }

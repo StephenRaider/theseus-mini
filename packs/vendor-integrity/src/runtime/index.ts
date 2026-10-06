@@ -5,7 +5,7 @@ import { nameSimilarity, normalizeName } from "../matchers/names.ts";
 import { batchHandlers, discoverBatch, reportBatch, verifyBatch } from "./batch.ts";
 import { KaveriClient, type ClientOptions } from "./client.ts";
 import { discoverBidders, onboardHandlers, reportOnboarding, verifyOnboarding } from "./onboard.ts";
-import { Directory, lineKey, nameKey, vendorIntegrityTools, vendorKey, type EmailRec, type TenderRec } from "./tools.ts";
+import { Directory, lineKey, nameKey, vendorIntegrityTools, vendorKey, type EmailRec, type TenderRec, type VendorRec } from "./tools.ts";
 
 export { KaveriClient, type ClientOptions, type SiteKey } from "./client.ts";
 export { Directory, parseLabelled } from "./tools.ts";
@@ -136,6 +136,41 @@ export async function createVendorIntegrityRuntime(opts: VendorIntegrityOptions)
       return { tool: "payments.hold_line", input: { batchId, lineId, reason } };
     },
 
+    async lookup(subject, ctx, depth = "letter") {
+      const w = subject.trim();
+      // Tender by id.
+      const tid = /\bT-\d{4}-\d+\b/i.exec(w)?.[0]?.toUpperCase();
+      if (tid) {
+        const t = await ctx.call<TenderRec>("eproc.get_tender", { id: tid }).catch(() => null);
+        if (t) return { found: { label: `${t.id} ${t.title}`, kind: "tender", facts: { id: t.id, title: t.title, status: t.status, publishedOn: t.publishedOn, qualifiedBidders: t.qualifiedBidders } }, suggestions: [] };
+      }
+      if (!dir.vendors.size) await ctx.call("vendor.search", { q: "" }).catch(() => undefined);
+      // Vendor by id or name (exact-ish only: a near miss gets suggested, never assumed).
+      const vid = /\bV-\d+\b/i.exec(w)?.[0]?.toUpperCase();
+      const n = normalizeName(w);
+      const scored = [...dir.vendors.values()]
+        .map((v) => ({ v, score: v.id === vid ? 2 : normalizeName(v.legalName) === n ? 1.9 : nameSimilarity(v.legalName, w) }))
+        .sort((a, b) => b.score - a.score);
+      const best = scored[0];
+      if (best && best.score >= 0.9) {
+        const v = await ctx.call<VendorRec>("vendor.get", { id: best.v.id }).catch(() => best.v);
+        if (depth === "full") return { found: await vendorProfile(v, ctx), suggestions: [] };
+        // Letters don't need bank details or the audit trail.
+        const facts = {
+          vendorId: v.id, legalName: v.legalName, ...(v.tradeName ? { tradeName: v.tradeName } : {}), status: v.status,
+          address: v.address, state: v.state, email: v.email, phone: v.phone, pan: v.pan, gstin: v.gstin,
+          ...(v.udyam ? { msme: `${v.udyam.category} (${v.udyam.number})` } : {}),
+          activatedBy: v.approvedBy,
+          onboardedOn: v.history.find((h) => h.field === "status" && h.after === "active")?.at?.slice(0, 10),
+        };
+        return { found: { label: v.legalName, kind: "vendor", facts }, suggestions: [] };
+      }
+      // A bidder on a tender (not yet a vendor).
+      const bidder = [...dir.bidders].find((b) => nameSimilarity(b, w) >= 0.9);
+      if (bidder) return { found: { label: bidder, kind: "bidder", facts: { legalName: bidder, note: "a bidder on an open tender, not yet in the vendor master" } }, suggestions: [] };
+      return { found: null, suggestions: scored.filter((x) => x.score >= 0.6).slice(0, 3).map((x) => x.v.legalName) };
+    },
+
     verify: { "payment-batch-check": verifyBatch, "onboard-contractor": verifyOnboarding },
     report: { "payment-batch-check": reportBatch, "onboard-contractor": reportOnboarding },
   };
@@ -143,3 +178,38 @@ export async function createVendorIntegrityRuntime(opts: VendorIntegrityOptions)
 }
 
 const STOP = new Set(["please", "check", "the", "this", "that", "with", "from", "have", "make", "sure", "run", "for", "and", "all"]);
+
+/* ------------------------------------------------------------------ "tell me everything about X" */
+
+const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+
+/** Everything the desk knows about one vendor, read live from each system, as facts + a readable profile. */
+async function vendorProfile(v: VendorRec, ctx: Parameters<NonNullable<PackRuntime["lookup"]>>[1]) {
+  const safe = async <T,>(p: Promise<T>) => p.catch(() => undefined);
+  const [gst, debar, bills, batches] = await Promise.all([
+    v.gstin ? safe(ctx.call<{ status: string; registeredOn?: string; legalName?: string }>("gov.gstin_status", { gstin: v.gstin })) : undefined,
+    safe(ctx.call<{ hits: { reason: string; until: string }[] }>("lists.check_debarment", { name: v.legalName, ...(v.pan ? { pan: v.pan } : {}) })),
+    safe(ctx.call<{ bills: { billNumber: string; amount: number; paidOn: string }[] }>("payments.paid_bills", { vendorId: v.id })),
+    safe(ctx.call<{ batches: { id: string; status: string }[] }>("payments.list_batches", {})),
+  ]);
+  const open: string[] = [];
+  for (const b of batches?.batches ?? []) {
+    const full = await safe(ctx.call<{ id: string; lines: { id: string; vendorId: string; billNumber: string; net: number; status: string; note?: string }[] }>("payments.get_batch", { id: b.id }));
+    for (const l of full?.lines ?? []) if (l.vendorId === v.id) open.push(`${full!.id} ${l.id}: bill ${l.billNumber}, net ${inr(l.net)}, ${l.status}${l.note ? ` (${l.note})` : ""}`);
+  }
+  const paid = [...(bills?.bills ?? [])].sort((a, b) => b.paidOn.localeCompare(a.paidOn));
+  const changes = v.history.filter((h) => h.field !== "status" || h.after !== "pending").slice(-5);
+  const lines = [
+    `${v.legalName} (${v.id}) · ${v.status}${v.paymentsOnHold ? ` · PAYMENTS ON HOLD${v.holdReason ? `: ${v.holdReason}` : ""}` : ""}`,
+    `Address: ${v.address}${v.state && !v.address.includes(v.state) ? `, ${v.state}` : ""}`,
+    `Contact: ${v.email} · ${v.phone}`,
+    `PAN: ${v.pan ?? "not on record"} · GSTIN: ${v.gstin ?? "not on record"}${gst ? ` (GST portal: ${gst.status})` : ""}`,
+    `Bank: ${v.bank.accountNumber} / ${v.bank.ifsc}, holder "${v.bank.holderName}"`,
+    `MSME: ${v.udyam ? `${v.udyam.category} (${v.udyam.number})` : "not registered"}${v.agreedCreditDays ? ` · credit terms ${v.agreedCreditDays} days` : ""}`,
+    `Debarment register: ${debar?.hits.length ? debar.hits.map((h) => `DEBARRED until ${h.until}: ${h.reason}`).join("; ") : "not listed"}`,
+    `Payments made: ${paid.length ? `${paid.length}, last on ${paid[0]!.paidOn} (${paid.slice(0, 3).map((b) => `${b.billNumber} ${inr(b.amount)} on ${b.paidOn}`).join("; ")})` : "none on record"}`,
+    open.length ? `In payment batches: ${open.join("; ")}` : "",
+    changes.length ? `Recent changes to the record: ${changes.map((h) => `${h.at.slice(0, 10)} ${h.field} by ${h.by}${h.source ? ` (${h.source})` : ""}`).join("; ")}` : "",
+  ].filter(Boolean);
+  return { label: v.legalName, kind: "vendor", facts: { ...v, gstPortal: gst?.status, debarred: !!debar?.hits.length, paidBills: paid, inBatches: open }, profile: lines.join("\n") };
+}

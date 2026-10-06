@@ -1,3 +1,4 @@
+import type { ScriptRule } from "@theseus/core";
 import { ScriptedModel, type ModelRequest } from "@theseus/core";
 
 /**
@@ -12,13 +13,31 @@ const has = (re: RegExp) => (r: ModelRequest) => re.test(req(r));
 
 const route = (d: Record<string, unknown>) => ({ inScope: true, successCriteria: [], assumptions: [], questions: [], relevant: [], ...d });
 
-export function scriptedModel(): ScriptedModel {
+export function scriptedModel(extra: ScriptRule[] = []): ScriptedModel {
   return new ScriptedModel([
+    ...extra,
     /* ---------------- routing */
     {
       purpose: "route",
       match: has(/poem|marketing|flight|holiday|recipe|essay/i),
       reply: route({ inScope: false, tier: 1, goal: "Out of scope", refusal: "That's outside my role: I handle vendor and payment integrity at Kaveri Infra, so I'll leave that one with you." }),
+    },
+    {
+      purpose: "route",
+      match: has(/\b(everything|all (the )?info(rmation)?|tell me about|details (of|on|for))\b/i),
+      reply: (r: ModelRequest) => {
+        const subject = /\b(?:on|about|of|for)\s+([A-Z][\w&.]*(?:\s+[A-Za-z][\w&.]*){0,5}?)\s*[.?!]?$/.exec(req(r).trim())?.[1] ?? "";
+        return route({ tier: 3, mode: "lookup", goal: `Everything on ${subject}`, lookup: { subjects: [subject.replace(/\.$/, "")] } });
+      },
+    },
+    {
+      purpose: "route",
+      match: has(/\b(letter|draft|write|prepare)\b.*\b(doc|document|letter|note|email)\b|\b(letter|note) (to|for)\b/i),
+      reply: (r: ModelRequest) => {
+        const text = req(r);
+        const subject = /\b(?:to|for)\s+([A-Z][\w&.]*(?:\s+[A-Za-z][\w&.]*){0,5}?)(?=\s+(?:and|informing|about|confirming|regarding)\b|[,.]|$)/.exec(text)?.[1] ?? "";
+        return route({ tier: 3, mode: "draft", goal: `Draft a formal letter to ${subject}`, draft: { document: "a formal letter confirming successful empanelment", subjects: subject ? [subject] : [] } });
+      },
     },
     {
       purpose: "route",
@@ -117,6 +136,29 @@ export function scriptedModel(): ScriptedModel {
           { title: "Vendor", path: "item.legalName" },
           { title: "Bills paid", path: "steps.paid.bills" },
         ],
+      },
+    },
+
+    /* ---------------- drafting */
+    {
+      purpose: "draft",
+      reply: (r: ModelRequest) => {
+        const facts = JSON.parse(/FACTS[^\n]*\n([\s\S]*?)\n\nWrite it/.exec(r.prompt)?.[1] ?? "[]") as { label: string; facts: Record<string, string> }[];
+        const v = facts[0]?.facts ?? {};
+        const today = /TODAY: (\S+)/.exec(r.prompt)?.[1] ?? "";
+        return {
+          fileName: `Empanelment letter - ${v.legalName ?? "vendor"}.docx`,
+          title: "Confirmation of Empanelment",
+          subtitle: `Ref: [Ref. No.] · ${today}`,
+          blocks: [
+            { kind: "paragraph", text: `To\n${v.legalName ?? ""}\n${v.address ?? ""}` },
+            { kind: "paragraph", text: "Dear Sir/Madam," },
+            { kind: "paragraph", text: `We are pleased to inform you that ${v.legalName} has been successfully empanelled as an approved vendor of Kaveri Infra Pvt Ltd, under vendor code ${v.vendorId}.` },
+            { kind: "table", rows: [["Detail", "On our records"], ["Vendor code", String(v.vendorId)], ["GSTIN", String(v.gstin ?? "")], ["PAN", String(v.pan ?? "")]] },
+            { kind: "paragraph", text: "Please quote your vendor code on all invoices and correspondence. Any change to your bank details must be requested in writing on your letterhead and will be confirmed by a call-back before it takes effect." },
+            { kind: "paragraph", text: "Yours faithfully,\n[Name, Designation]\nVendor Desk, Kaveri Infra Pvt Ltd" },
+          ],
+        };
       },
     },
 

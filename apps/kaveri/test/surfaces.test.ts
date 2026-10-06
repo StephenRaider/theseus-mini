@@ -158,6 +158,21 @@ describe("Local workspace", () => {
     expect(await readFile(join(dir, "precious.txt"), "utf8")).toBe("do not delete");
   });
 
+  it("recovers a workspace whose reset was interrupted (marker gone, only our folders left)", async () => {
+    // What happened on Jyotiraditya's PC: the reset deleted the marker, then Windows refused to delete "Vendor Desk".
+    const dir = await tmp();
+    await mkdir(join(dir, "Vendor Desk", "Bidders"), { recursive: true });
+    await mkdir(join(dir, "Attachments"), { recursive: true });
+    await writeFile(join(dir, "Attachments", "mine.pdf"), "user file");
+    await generateWorkspace(initialState(), dir);
+    expect(existsSync(join(dir, MARKER))).toBe(true);
+    expect(existsSync(join(dir, WORKSPACE_FILES.register))).toBe(true);
+    expect(await readFile(join(dir, "Attachments", "mine.pdf"), "utf8")).toBe("user file");
+    // …and a later reset keeps the marker, so it can never get into that state again.
+    await generateWorkspace(initialState(), dir);
+    expect(existsSync(join(dir, MARKER))).toBe(true);
+  });
+
   it("world reset from the Control Room regenerates the workspace", async () => {
     const dir = await tmp();
     const k = new Kaveri();

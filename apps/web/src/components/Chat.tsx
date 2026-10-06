@@ -7,17 +7,21 @@ import { THESEUS_ID, type Approval, type Attachment, type Command, type Message 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { attachmentRef, bridge, mimeOf } from "../bridge.ts";
 import { clock, currentTask, dayLabel, progress, sameDay, taskTitle } from "../state/selectors.ts";
-import type { AppState } from "../state/store.ts";
+import type { AppState, OrientView, QuestionView } from "../state/store.ts";
 import { Avatar, FileCard, Icon, Tag, alertish } from "./ui.tsx";
 
-type Entry = { kind: "msg"; ts: string; m: Message; nudge?: boolean } | { kind: "approval"; ts: string; a: Approval };
+type Entry =
+  | { kind: "msg"; ts: string; m: Message; nudge?: boolean }
+  | { kind: "approval"; ts: string; a: Approval }
+  | { kind: "question"; ts: string; q: QuestionView }
+  | { kind: "orient"; ts: string; o: OrientView };
 
 export function Chat(props: {
   state: AppState;
   now: string;
   threadId: string;
   send: (c: Command) => void;
-  suggestion?: string;
+  suggestions: string[];
   draft: string;
   setDraft: (s: string) => void;
 }) {
@@ -38,6 +42,13 @@ export function Chat(props: {
       if (e.type !== "approval.requested") continue;
       if (state.tasks[e.payload.taskId]?.employeeId !== threadId) continue;
       out.push({ kind: "approval", ts: e.ts, a: state.approvals[e.payload.id]! });
+    }
+    for (const id of state.questionOrder) {
+      const q = state.questions[id]!;
+      if (q.employeeId === threadId) out.push({ kind: "question", ts: q.at, q });
+    }
+    for (const o of Object.values(state.orients)) {
+      if (state.tasks[o.taskId]?.employeeId === threadId && (o.found.length || o.assumptions.length)) out.push({ kind: "orient", ts: o.at, o });
     }
     return out.sort((x, y) => x.ts.localeCompare(y.ts));
   }, [state, threadId]);
@@ -140,6 +151,19 @@ export function Chat(props: {
         </div>
       </header>
 
+      {(() => {
+        const active = Object.values(state.constraints).filter((c) => c.employeeId === threadId && !c.lifted);
+        return active.length ? (
+          <div className="rules" title="Standing instructions: checked before every change this employee makes">
+            {active.map((c) => (
+              <span key={c.id} className="rule">
+                <Icon name="hold" size={13} /> {c.text}
+              </span>
+            ))}
+          </div>
+        ) : null;
+      })()}
+
       <div
         className="messages"
         ref={scroller}
@@ -153,12 +177,16 @@ export function Chat(props: {
             const prev = entries[i - 1];
             const sep = !prev || !sameDay(prev.ts, en.ts) ? <div className="daysep" key={`d${i}`}><span>{dayLabel(en.ts, now)}</span></div> : null;
             return (
-              <div key={en.kind === "msg" ? en.m.id : en.a.id}>
+              <div key={en.kind === "msg" ? en.m.id : en.kind === "approval" ? en.a.id : en.kind === "question" ? en.q.id : `orient-${en.o.taskId}`}>
                 {sep}
                 {en.kind === "msg" ? (
                   <Bubble m={en.m} threadId={threadId} nudge={en.nudge} grouped={!sep && prev?.kind === "msg" && prev.m.from === en.m.from} />
-                ) : (
+                ) : en.kind === "approval" ? (
                   <ApprovalCard a={en.a} ts={en.ts} state={state} send={send} />
+                ) : en.kind === "question" ? (
+                  <QuestionCard q={en.q} state={state} send={send} />
+                ) : (
+                  <OrientCard o={en.o} />
                 )}
               </div>
             );
@@ -167,13 +195,15 @@ export function Chat(props: {
       </div>
 
       <footer className="composer">
-        {props.suggestion ? (
-          <button className="suggestion" onClick={() => doSend(props.suggestion!)}>
-            <Icon name="play" size={14} />
-            <span>
-              <b>Try the demo:</b> {props.suggestion}
-            </span>
-          </button>
+        {props.suggestions.length ? (
+          <div className="suggestions">
+            {props.suggestions.map((sug) => (
+              <button key={sug} className="suggestion" onClick={() => doSend(sug)}>
+                <Icon name="play" size={14} />
+                <span>{sug}</span>
+              </button>
+            ))}
+          </div>
         ) : null}
         {working && threadId !== THESEUS_ID ? (
           <div className="composer__hint">
@@ -306,6 +336,75 @@ function ApprovalCard({ a, ts, state, send }: { a: Approval; ts: string; state: 
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A question an employee asked you mid-work. Soft ones already proceed with a default. */
+function QuestionCard({ q, state, send }: { q: QuestionView; state: AppState; send: (c: Command) => void }) {
+  const [text, setText] = useState("");
+  const item = q.taskId && q.itemId ? state.plans[q.taskId]?.items.find((i) => i.id === q.itemId) : undefined;
+  const answer = (a: string) => a.trim() && send({ type: "answer_question", questionId: q.id, answer: a.trim() });
+  const choices = q.options.length ? q.options : q.default !== undefined ? [q.default, ...(/^yes$/i.test(q.default) ? ["no"] : [])] : [];
+  return (
+    <div className={`approval question ${q.answer ? "approval--approved" : q.blocking ? "approval--pending" : "question--soft"}`}>
+      <div className="approval__head">
+        <span className="approval__dot" />
+        <span className="approval__kicker">{q.answer ? "Answered" : q.blocking ? "Question: waiting for you" : "Question: going ahead meanwhile"}</span>
+        {item ? <span className="approval__item">{item.label}</span> : null}
+        <span className="approval__time">{clock(q.at)}</span>
+      </div>
+      <div className="approval__title">{q.text}</div>
+      {!q.blocking && !q.answer && q.default !== undefined ? <div className="approval__reason">Until you answer, I'm assuming “{q.default}”. Other work doesn't wait.</div> : null}
+      {q.answer ? (
+        <div className="approval__resolved approval__resolved--approved">
+          <Icon name="check" size={14} />
+          {q.answer.usedDefault ? `No answer needed; kept “${q.answer.text}”` : `${q.answer.by.startsWith("user") ? "You" : q.answer.by}: ${q.answer.text}`}
+        </div>
+      ) : (
+        <div className="approval__actions">
+          {choices.map((c) => (
+            <button key={c} className={`btn ${c === q.default ? "btn--primary" : ""}`} onClick={() => answer(c)}>
+              {c === q.default ? `Yes, ${c}` : c[0]!.toUpperCase() + c.slice(1)}
+            </button>
+          ))}
+          <input
+            className="question__input"
+            placeholder={choices.length ? "…or type an answer" : "Type your answer"}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") answer(text);
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What the employee looked at before planning, and what it assumed (Framework Spec §10). */
+function OrientCard({ o }: { o: OrientView }) {
+  return (
+    <div className="orient">
+      <div className="orient__head">
+        <Icon name="search" size={13} /> Looked around first <span className="orient__time">{clock(o.at)}</span>
+      </div>
+      {o.found.length ? (
+        <ul className="orient__list">
+          {o.found.map((f) => (
+            <li key={f.ref}>
+              <span className="orient__kind">{f.kind}</span> {f.label}
+              {f.why ? <span className="orient__why"> · {f.why}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {o.assumptions.length ? (
+        <div className="orient__assume">
+          <b>Assumed:</b> {o.assumptions.join(" · ")}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -9,6 +9,7 @@
  */
 import { FileSandbox, SandboxError, type Root } from "@theseus/core";
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell, type IpcMainInvokeEvent } from "electron";
+import { fork, type ChildProcess } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -82,6 +83,74 @@ function unwatch(id: string) {
   watchers.delete(id);
 }
 
+/* ------------------------------------------------------------------ the agent host (employees run in their own process) */
+
+type HostMode = "live" | "demo";
+interface HostInfo {
+  mode: HostMode;
+  model: string;
+  note?: string;
+  workspaceDir: string;
+  today: string;
+  suggestions: string[];
+}
+
+let host: ChildProcess | null = null;
+let hostInfo: HostInfo | null = null;
+let hostError: string | null = null;
+let hostReady: Promise<void> = Promise.resolve();
+/** Every event since the host started: a reloaded window replays these. */
+let backlog: unknown[] = [];
+
+/**
+ * Fork apps/server/src/host.ts with tsx, using Electron's own Node. The kernel,
+ * the company world and the model calls all live there; this process only relays.
+ */
+function startHost(mode?: HostMode) {
+  backlog = [];
+  hostInfo = null;
+  hostError = null;
+  const script = path.join(REPO_ROOT, "apps/server/src/host.ts");
+  const child = fork(script, mode ? [mode] : [], {
+    cwd: REPO_ROOT,
+    execArgv: ["--import", "tsx"],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", THESEUS_WORKSPACE: WORKSPACE_DIR },
+    stdio: ["ignore", "inherit", "inherit", "ipc"],
+  });
+  host = child;
+  hostReady = new Promise<void>((resolve) => {
+    child.on("message", (m: { type: string; event?: unknown; info?: HostInfo; message?: string }) => {
+      if (child !== host) return;
+      if (m.type === "event") {
+        backlog.push(m.event);
+        win?.webContents.send("agent:event", m.event);
+      } else if (m.type === "ready") {
+        hostInfo = m.info!;
+        win?.webContents.send("agent:status", { info: hostInfo, error: null });
+        resolve();
+      } else if (m.type === "fatal" || m.type === "error") {
+        hostError = m.message ?? "unknown error";
+        win?.webContents.send("agent:status", { info: hostInfo, error: hostError });
+        if (m.type === "fatal") resolve();
+      }
+    });
+    child.on("exit", (code) => {
+      if (child !== host) return;
+      if (code) {
+        hostError = hostError ?? `The agent process stopped (exit code ${code})`;
+        win?.webContents.send("agent:status", { info: hostInfo, error: hostError });
+      }
+      resolve();
+    });
+  });
+}
+
+function stopHost() {
+  const h = host;
+  host = null;
+  h?.kill();
+}
+
 /* ------------------------------------------------------------------ IPC: the bridge's other half */
 
 /** Only our own UI may call the bridge. */
@@ -110,6 +179,22 @@ const str = (v: unknown, name: string) => {
 const ATTACH_DIR = "Attachments";
 
 function registerIpc() {
+  handle("agent:init", async () => {
+    await hostReady;
+    return { info: hostInfo, error: hostError, events: backlog };
+  });
+  handle("agent:command", async (command: unknown) => {
+    if (!command || typeof command !== "object" || typeof (command as { type?: unknown }).type !== "string") throw new Error("Bad command");
+    if (!host?.connected) throw new Error(hostError ?? "The agent isn't running");
+    host.send({ type: "command", command });
+  });
+  handle("agent:restart", async (mode: unknown) => {
+    stopHost();
+    win?.webContents.send("agent:reset");
+    startHost(mode === "live" || mode === "demo" ? mode : undefined);
+    await hostReady;
+    return { info: hostInfo, error: hostError, events: backlog };
+  });
   handle("files:roots", async () => sandbox.list());
   handle("files:walk", async (rootId: unknown, rel: unknown) => sandbox.walk(str(rootId, "rootId"), typeof rel === "string" ? rel : ""));
   handle("files:readText", async (rootId: unknown, rel: unknown) => sandbox.readText(str(rootId, "rootId"), str(rel, "rel")));
@@ -225,8 +310,10 @@ app.whenReady().then(async () => {
   }
   await ensureWorkspace().catch((e) => console.error("[theseus] workspace:", e));
   for (const r of sandbox.list()) watchRoot(r);
+  startHost(process.env.THESEUS_MODE === "live" || process.env.THESEUS_MODE === "demo" ? process.env.THESEUS_MODE : undefined);
   registerIpc();
   await createWindow();
+  if (process.env.THESEUS_SMOKE) void smoke();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
@@ -234,5 +321,54 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   for (const id of [...watchers.keys()]) unwatch(id);
+  stopHost();
   if (process.platform !== "darwin") app.quit();
 });
+
+/**
+ * THESEUS_SMOKE=1: an automated end-to-end check of the packaged wiring
+ * (window + agent process + UI). Asks Theseus for the batch check, waits for
+ * the task to finish, prints what the window shows, and quits.
+ */
+async function smoke() {
+  const fail = (why: string) => {
+    console.log(`[smoke] FAIL: ${why}`);
+    app.exit(1);
+  };
+  const timer = setTimeout(() => fail("timed out"), 120_000);
+  await hostReady;
+  if (!host?.connected) return fail(hostError ?? "agent did not start");
+  console.log(`[smoke] agent ready: ${JSON.stringify(hostInfo)}`);
+  // Drive the real UI: type into Theseus's composer and press Enter, like a person would.
+  await new Promise((r) => setTimeout(r, 1500));
+  await win!.webContents.executeJavaScript(`document.querySelector(".composer textarea")?.focus()`);
+  win!.webContents.focus();
+  await win!.webContents.insertText("Run the integrity check on this week's payment batch");
+  await new Promise((r) => setTimeout(r, 200));
+  win!.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+  win!.webContents.sendInputEvent({ type: "char", keyCode: "\r" });
+  win!.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+  const sentAt = Date.now();
+  while (backlog.length && !backlog.some((e) => (e as { type: string }).type === "message.posted" && JSON.stringify(e).includes("integrity check"))) {
+    if (Date.now() - sentAt > 8000) return fail(`the UI did not deliver the message (toast: ${await win!.webContents.executeJavaScript(`document.querySelector(".toast")?.innerText ?? "none"`)})`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const done = () => backlog.some((e) => (e as { type: string; payload: { status?: string } }).type === "task.status_changed" && (e as { payload: { status?: string } }).payload.status === "done");
+  while (!done()) await new Promise((r) => setTimeout(r, 250));
+  await new Promise((r) => setTimeout(r, 1500)); // let the UI flush
+  const text = String(await win!.webContents.executeJavaScript("document.body.innerText"));
+  console.log(`[smoke] events: ${backlog.length}`);
+  console.log(`[smoke] window text:\n${text.slice(0, 1500)}`);
+  const shots = process.env.THESEUS_SMOKE_SHOTS;
+  if (shots) {
+    await fs.mkdir(shots, { recursive: true });
+    win!.setSize(1480, 920);
+    await fs.writeFile(path.join(shots, "1-theseus.png"), (await win!.webContents.capturePage()).toPNG());
+    await win!.webContents.executeJavaScript(`document.querySelectorAll(".chatrow")[1]?.click()`);
+    await new Promise((r) => setTimeout(r, 800));
+    await fs.writeFile(path.join(shots, "2-employee.png"), (await win!.webContents.capturePage()).toPNG());
+  }
+  clearTimeout(timer);
+  console.log("[smoke] OK");
+  app.exit(0);
+}
