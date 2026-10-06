@@ -13,10 +13,14 @@
     "test:watch": "vitest",
     "check": "pnpm typecheck && pnpm test",
     "kaveri": "pnpm --filter @theseus/kaveri dev",
-    "world:reset": "pnpm --filter @theseus/kaveri world:reset"
+    "world:reset": "pnpm --filter @theseus/kaveri world:reset",
+    "app": "pnpm --filter @theseus/desktop dev",
+    "app:prod": "pnpm --filter @theseus/desktop start",
+    "web": "pnpm --filter @theseus/web dev"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "electron",
       "esbuild"
     ]
   },

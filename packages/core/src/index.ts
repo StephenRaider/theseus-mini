@@ -3,3 +3,4 @@
  * M1: role-pack loading + validation. The agent loop arrives in M3.
  */
 export * from "./rolepack.ts";
+export * from "./files.ts";

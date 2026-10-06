@@ -1,0 +1,68 @@
+/*
+ * Design tokens: Jyotiraditya's Widget Styling Guide + the app additions
+ * from the Implementation Plan §6. Edit colours here; components only use
+ * these variables.
+ */
+:root,
+[data-theme="dark"] {
+  --bg-color: #0f0f0f;
+  --surface-1: #141414;
+  --surface-2: #1a1a1a;
+  --text-primary: #ffffff;
+  --text-secondary: #aaaaaa;
+  --accent-color: #00d2d3;
+  --accent-soft: rgba(0, 210, 211, 0.14);
+  --border-color: rgba(255, 255, 255, 0.1);
+  --item-bg: rgba(255, 255, 255, 0.05);
+  --item-hover: rgba(255, 255, 255, 0.1);
+  --tabs-bg: rgba(0, 0, 0, 0.15);
+
+  /* Semantic: green = done / unread · red = needs you · yellow = heads-up */
+  --correct-color: #4caf50;
+  --incorrect-color: #ff5555;
+  --warning-color: #ffb020;
+  --held-color: #a78bfa;
+  --skipped-fill: rgba(170, 170, 170, 0.22);
+
+  --bubble-me: rgba(0, 210, 211, 0.16);
+  --bubble-them: rgba(255, 255, 255, 0.06);
+  --chat-bg: #0c0c0c;
+  --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45);
+
+  --font: "Inter", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --r-panel: 12px;
+  --r-btn: 8px;
+  --r-input: 6px;
+  --r-small: 4px;
+
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg-color: #f0f0f0;
+  --surface-1: #f7f7f7;
+  --surface-2: #ffffff;
+  --text-primary: #111111;
+  --text-secondary: #555555;
+  --accent-color: #00a8ff;
+  --accent-soft: rgba(0, 168, 255, 0.12);
+  --border-color: rgba(0, 0, 0, 0.1);
+  --item-bg: rgba(0, 0, 0, 0.03);
+  --item-hover: rgba(0, 0, 0, 0.08);
+  --tabs-bg: rgba(0, 0, 0, 0.05);
+  --skipped-fill: rgba(85, 85, 85, 0.18);
+  --bubble-me: rgba(0, 168, 255, 0.14);
+  --bubble-them: #ffffff;
+  --chat-bg: #e9e9e9;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.15);
+  color-scheme: light;
+}

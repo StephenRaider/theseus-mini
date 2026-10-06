@@ -5,7 +5,9 @@
   "description": "Mock company Kaveri Infra Pvt Ltd: mail, ERP, bank portal, gov lookup, with seed data, faults and ground truth.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./workspace": "./src/workspace.ts",
+    "./seed": "./src/seed/scenario.ts"
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",

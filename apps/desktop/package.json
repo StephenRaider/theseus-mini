@@ -1,0 +1,24 @@
+{
+  "name": "@theseus/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron shell for Theseus: window, sandboxed local files, open in Excel/Word.",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "node scripts/run.mjs dev",
+    "start": "node scripts/run.mjs prod",
+    "build": "node scripts/run.mjs build",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@theseus/core": "workspace:*",
+    "@theseus/kaveri": "workspace:*"
+  },
+  "devDependencies": {
+    "@theseus/web": "workspace:*",
+    "electron": "^44.5.1",
+    "esbuild": "^0.25.0",
+    "vite": "^6.4.0"
+  }
+}

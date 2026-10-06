@@ -72,6 +72,7 @@ export type Approval = z.infer<typeof Approval>;
 
 /** A chat message. Each employee has its own thread with the user. */
 export const Attachment = z.object({ name: z.string(), mime: z.string(), ref: z.string() });
+export type Attachment = z.infer<typeof Attachment>;
 export const Message = z.object({
   id: Id,
   /** Which conversation (employee id) this belongs to. */
