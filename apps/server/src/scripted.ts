@@ -1,5 +1,6 @@
 import type { ScriptRule } from "@theseus/core";
 import { ScriptedModel, type ModelRequest } from "@theseus/core";
+import { operateRules } from "./scripted-operate.ts";
 
 /**
  * A scripted stand-in for the model, for tests and for trying the harness
@@ -16,6 +17,8 @@ const route = (d: Record<string, unknown>) => ({ inScope: true, successCriteria:
 export function scriptedModel(extra: ScriptRule[] = []): ScriptedModel {
   return new ScriptedModel([
     ...extra,
+    /* ---------------- operate (computer use): the invoice-entry job */
+    ...operateRules(),
     /* ---------------- routing */
     {
       purpose: "route",

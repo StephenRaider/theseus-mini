@@ -3,6 +3,7 @@
  *
  *   pnpm agent "Run the integrity check on this week's payment batch"
  *   pnpm agent --scripted "Empanel the T-2026-14 bidders"      (no API key needed)
+ *   pnpm agent --scripted --headed "Find the latest invoice from Hoysala Steel, extract the amount and due date, enter it into FinDesk and tell me once it's done"
  *
  * Options
  *   --scripted          use the scripted stand-in model (known demo requests only)
@@ -11,6 +12,9 @@
  *   --cache             reuse identical model answers from .theseus/model-cache (saves quota)
  *   --log FILE          also write every event as JSON lines
  *   --pace MS           pause MS after every step so you can follow along and interrupt
+ *   --headed            show the employee's browser window (computer use) instead of running it hidden
+ *   --slowmo MS         slow every browser action down by MS (with --headed, to watch it work)
+ *   --no-browser        no browser: APIs and files only
  *
  * While it runs, type a message and press Enter to talk to the employee
  * (e.g. "hold everything to Shree Ganesh", "skip PL-07", "how far are you?").
@@ -31,7 +35,7 @@ const opt = (name: string) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
 };
-const VALUE_OPTS = new Set(["--approve", "--log", "--pace"]);
+const VALUE_OPTS = new Set(["--approve", "--log", "--pace", "--slowmo"]);
 const request = args.filter((a, i) => !a.startsWith("--") && !VALUE_OPTS.has(args[i - 1] ?? "")).join(" ").trim();
 
 if (!request) {
@@ -42,17 +46,29 @@ if (!request) {
 const envFile = join(REPO_ROOT, ".env");
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
-const world = flag("live-world") ? liveWorld() : await inProcessWorld();
+// Computer use needs sites a browser can open: the in-process world listens on free local ports.
+const useBrowser = !flag("no-browser");
+const world = flag("live-world") ? liveWorld() : await inProcessWorld({ listen: useBrowser });
 const logFile = opt("log");
 // Flight recorder: every event and model call go to .theseus/runs/ (unless --log names a file).
 const rec = recorder("cli");
 const model = rec.trace(flag("scripted") ? scriptedModel() : modelFromEnv({ cache: flag("cache") }));
 const log = logFile ? new EventLog({ file: logFile }) : rec.log;
-const { kernel, employee } = await createHarness({ world, model, log, stepDelayMs: Number(opt("pace") ?? 0) });
+const { kernel, employee, close } = await createHarness({
+  world,
+  model,
+  log,
+  stepDelayMs: Number(opt("pace") ?? 0),
+  ...(useBrowser ? { browser: { headless: !flag("headed"), ...(opt("slowmo") ? { slowMo: Number(opt("slowmo")) } : {}) } } : {}),
+});
+const exit = async (code = 0) => {
+  await close().catch(() => undefined);
+  process.exit(code);
+};
 attachPrinter(kernel);
 
 const auto = opt("approve");
-console.log(`\x1b[2mWorld: ${world.mode} · workspace: ${world.workspaceDir} · model: ${model.name}\x1b[0m`);
+console.log(`\x1b[2mWorld: ${world.mode} · workspace: ${world.workspaceDir} · model: ${model.name} · browser: ${useBrowser ? (flag("headed") ? "visible" : "hidden") : "off"}\x1b[0m`);
 console.log(`\x1b[2mType a message to talk to ${employee.name} while it works; "approve <id>", "reject <id>", "status", "quit".\x1b[0m\n`);
 
 if (auto) {
@@ -66,7 +82,7 @@ rl.on("line", (raw) => {
   const line = raw.trim();
   if (!line) return;
   const [cmd, id, ...rest] = line.split(/\s+/);
-  if (cmd === "quit" || cmd === "exit") process.exit(0);
+  if (cmd === "quit" || cmd === "exit") return void exit(0);
   if (cmd === "status") {
     const run = [...kernel.runs.values()].pop();
     console.log(run ? kernel.status(run.task.id) : "No task yet.");
@@ -94,12 +110,12 @@ const timer = setInterval(async () => {
   if (waitingOnYou && stdinClosed) {
     clearInterval(timer);
     console.log(`\nStill waiting for you on: ${kernel.pendingApprovals().map((a) => `${a.id} (${a.title})`).join("; ")}. Run interactively (or with --approve all) to decide.`);
-    process.exit(0);
+    await exit(0);
   }
   if (!busyTask && !waitingOnYou) {
     clearInterval(timer);
     const calls = kernel.log.ofType("model.called");
     console.log(`\n\x1b[2mModel calls this run: ${calls.length} (${calls.filter((c) => c.payload.cached).length} cached). Events: ${kernel.log.events.length}.\x1b[0m`);
-    process.exit(0);
+    await exit(0);
   }
 }, 500);

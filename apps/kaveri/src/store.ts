@@ -1,4 +1,4 @@
-import type { Attachment, BankAccount, Email, KaveriState, PaymentBatch, PaymentFile, PaymentFileRow, PaymentLine, UdyamCategory, Vendor } from "./domain.ts";
+import type { ApInvoice, Attachment, BankAccount, Email, KaveriState, PaymentBatch, PaymentFile, PaymentFileRow, PaymentLine, UdyamCategory, Vendor } from "./domain.ts";
 import { initialState } from "./seed/scenario.ts";
 
 /** Business error with an HTTP status and a stable code the agent can classify. */
@@ -36,6 +36,8 @@ export class Kaveri {
   faults: FaultConfig = structuredClone(NO_FAULTS);
   /** Files uploaded through the sites (mail attachments): kept out of `state` so /__admin/state stays small. */
   uploads = new Map<string, { name: string; mime: string; data: Buffer }>();
+  /** FinDesk sign-in sessions: token → who. Not part of `state` (like a server's session store). */
+  apSessions = new Map<string, { actor: string; at: string }>();
   private rngState = NO_FAULTS.seed;
   private seq = 0;
   /** Hooks run after reset (e.g. regenerate the local workspace). */
@@ -46,6 +48,7 @@ export class Kaveri {
     this.setFaults({ ...NO_FAULTS, ...faults });
     this.seq = 0;
     this.uploads.clear();
+    this.apSessions.clear();
     for (const h of this.onReset) await h();
   }
 
@@ -92,7 +95,8 @@ export class Kaveri {
     const q = opts.q ? norm(opts.q) : "";
     return this.state.mail
       .filter((m) => m.folder === folder)
-      .filter((m) => !q || norm(`${m.from} ${m.fromName} ${m.subject} ${m.body}`).includes(q))
+      // Every word must appear somewhere (like a webmail search box), in any order.
+      .filter((m) => !q || q.split(" ").every((w) => norm(`${m.from} ${m.fromName} ${m.subject} ${m.body}`).includes(w)))
       .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
       .map(({ body: _b, ...rest }) => rest);
   }
@@ -447,5 +451,121 @@ export class Kaveri {
     b.releasedBy = approvedBy;
     this.audit(approvedBy!, "payments.release_batch", id);
     return b;
+  }
+
+  /* ------------------------------------------- FinDesk: legacy AP register */
+
+  apSignIn(actor: string): string {
+    const token = `ses_${Math.floor(this.rand() * 1e9).toString(36)}${this.apSessions.size}`;
+    this.apSessions.set(token, { actor, at: this.now() });
+    return token;
+  }
+
+  /** Is this session still valid? The "ap.session_expired" fault expires it (a real-world nuisance agents must handle). */
+  apSessionValid(token: string | undefined): boolean {
+    if (!token || !this.apSessions.has(token)) return false;
+    const n = this.faults.failNext["ap.session_expired"] ?? 0;
+    if (n > 0) {
+      this.faults.failNext["ap.session_expired"] = n - 1;
+      this.apSessions.delete(token);
+      return false;
+    }
+    return true;
+  }
+
+  listApInvoices(q = ""): ApInvoice[] {
+    const t = norm(q);
+    return this.state.apInvoices
+      .filter((i) => !t || norm(`${i.doc} ${i.vendorName} ${i.vendorId} ${i.number} ${i.status}`).includes(t))
+      .sort((a, b) => b.doc.localeCompare(a.doc));
+  }
+
+  getApInvoice(doc: string): ApInvoice {
+    const i = this.state.apInvoices.find((x) => x.doc === doc);
+    if (!i) throw new KaveriError(404, "NOT_FOUND", `No FinDesk document ${doc}`);
+    return i;
+  }
+
+  /**
+   * Book an invoice as a draft. Validation is deliberately "legacy": dates
+   * only as DD/MM/YYYY, amounts as plain digits, totals must add up, no
+   * duplicates per vendor. Each rule returns a message a person (or an agent)
+   * can act on.
+   */
+  saveApInvoice(f: Record<string, string>, by: string): ApInvoice {
+    const bad = (code: string, message: string): never => {
+      throw new KaveriError(422, code, message);
+    };
+    const vendorId = (f.vendorId ?? "").trim();
+    if (!vendorId) bad("VENDOR_REQUIRED", "Select the vendor.");
+    const v = this.state.vendors.find((x) => x.id === vendorId) ?? bad("VENDOR_UNKNOWN", `Unknown vendor ${vendorId}.`);
+    if (v.status !== "active") bad("VENDOR_INACTIVE", `${v.legalName} (${v.id}) is ${v.status}; invoices can't be booked against it.`);
+    const number = (f.number ?? "").trim().toUpperCase();
+    if (!number) bad("NUMBER_REQUIRED", "Enter the supplier's invoice number.");
+    const date = (label: string, raw: string | undefined): string => {
+      const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec((raw ?? "").trim());
+      const iso = m ? `${m[3]}-${m[2]}-${m[1]}` : "";
+      const d = new Date(`${iso}T00:00:00Z`);
+      if (!m || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso) bad("BAD_DATE", `${label} must be a date in DD/MM/YYYY format (e.g. 07/10/2026).`);
+      return iso;
+    };
+    const invoiceDate = date("Invoice date", f.invoiceDate);
+    const dueDate = date("Due date", f.dueDate);
+    if (dueDate < invoiceDate) bad("BAD_DATE", "Due date can't be before the invoice date.");
+    const amount = (label: string, raw: string | undefined): number => {
+      const t = (raw ?? "").trim();
+      if (!/^\d+(\.\d{1,2})?$/.test(t)) bad("BAD_AMOUNT", `${label}: digits only, no commas, spaces or "Rs." (e.g. 362000 or 362000.00).`);
+      return Number(t);
+    };
+    const taxable = amount("Taxable value", f.taxable);
+    const gst = amount("GST amount", f.gst);
+    const total = amount("Invoice total", f.total);
+    if (Math.abs(taxable + gst - total) > 1) bad("TOTAL_MISMATCH", `Invoice total ${total} doesn't equal taxable value + GST (${taxable + gst}).`);
+    const key = (s: string) => s.toUpperCase().replace(/\s+/g, "");
+    const dup = this.state.apInvoices.find((i) => i.vendorId === v.id && key(i.number) === key(number));
+    if (dup)
+      throw new KaveriError(
+        409,
+        "DUPLICATE_INVOICE",
+        `Duplicate: invoice ${dup.number} from ${v.legalName} is already booked as ${dup.doc} (${dup.status}, entered ${dup.enteredAt.slice(0, 10).split("-").reverse().join("/")}).`,
+      );
+    const seq = Math.max(99, ...this.state.apInvoices.map((i) => Number(i.doc.slice(-4)))) + 1;
+    const inv: ApInvoice = {
+      doc: `AP-2026-${String(seq).padStart(4, "0")}`,
+      vendorId: v.id,
+      vendorName: v.legalName,
+      number,
+      invoiceDate,
+      dueDate,
+      taxable,
+      gst,
+      total,
+      ...(f.workOrder?.trim() ? { workOrder: f.workOrder.trim() } : {}),
+      ...(f.remarks?.trim() ? { remarks: f.remarks.trim() } : {}),
+      status: "draft",
+      enteredBy: by,
+      enteredAt: this.now(),
+    };
+    this.state.apInvoices.push(inv);
+    this.audit(by, "findesk.save_invoice", `${inv.doc}: ${v.id} ${number} total ${total}`);
+    return inv;
+  }
+
+  /** Post a draft to the ledger: it becomes a payable. */
+  postApInvoice(doc: string, by: string): ApInvoice {
+    const i = this.getApInvoice(doc);
+    if (i.status === "posted") throw new KaveriError(409, "ALREADY_POSTED", `${doc} is already posted.`);
+    i.status = "posted";
+    i.postedBy = by;
+    i.postedAt = this.now();
+    this.audit(by, "findesk.post_invoice", `${doc}: ${i.vendorId} ${i.number}`);
+    return i;
+  }
+
+  deleteApDraft(doc: string, by: string): void {
+    const i = this.getApInvoice(doc);
+    if (i.status !== "draft") throw new KaveriError(409, "NOT_DRAFT", `${doc} is posted; posted documents can't be deleted.`);
+    this.state.apInvoices = this.state.apInvoices.filter((x) => x !== i);
+    this.audit(by, "findesk.delete_draft", doc);
   }
 }

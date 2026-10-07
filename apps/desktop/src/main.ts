@@ -101,6 +101,8 @@ let hostError: string | null = null;
 let hostReady: Promise<void> = Promise.resolve();
 /** Every event since the host started: a reloaded window replays these. */
 let backlog: unknown[] = [];
+/** Latest browser frame per employee (live view of computer use). */
+let frames = new Map<string, unknown>();
 
 /**
  * Fork apps/server/src/host.ts with tsx, using Electron's own Node. The kernel,
@@ -108,6 +110,7 @@ let backlog: unknown[] = [];
  */
 function startHost(mode?: HostMode) {
   backlog = [];
+  frames = new Map();
   hostInfo = null;
   hostError = null;
   const script = path.join(REPO_ROOT, "apps/server/src/host.ts");
@@ -119,9 +122,12 @@ function startHost(mode?: HostMode) {
   });
   host = child;
   hostReady = new Promise<void>((resolve) => {
-    child.on("message", (m: { type: string; event?: unknown; info?: HostInfo; message?: string }) => {
+    child.on("message", (m: { type: string; event?: unknown; info?: HostInfo; message?: string; frame?: { employeeId: string } }) => {
       if (child !== host) return;
-      if (m.type === "event") {
+      if (m.type === "frame" && m.frame) {
+        frames.set(m.frame.employeeId, m.frame);
+        win?.webContents.send("agent:frame", m.frame);
+      } else if (m.type === "event") {
         backlog.push(m.event);
         win?.webContents.send("agent:event", m.event);
       } else if (m.type === "ready") {
@@ -183,6 +189,7 @@ function registerIpc() {
     await hostReady;
     return { info: hostInfo, error: hostError, events: backlog };
   });
+  handle("agent:frames", async () => [...frames.values()]);
   handle("agent:command", async (command: unknown) => {
     if (!command || typeof command !== "object" || typeof (command as { type?: unknown }).type !== "string") throw new Error("Bad command");
     if (!host?.connected) throw new Error(hostError ?? "The agent isn't running");

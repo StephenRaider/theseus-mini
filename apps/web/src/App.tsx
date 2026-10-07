@@ -8,6 +8,7 @@ import { Work } from "./components/Work.tsx";
 import { LiveEngine } from "./live/engine.ts";
 import { ReplayEngine } from "./replay/engine.ts";
 import { kaveriDemo } from "./replay/kaveri-demo.ts";
+import { startFrames } from "./state/frames.ts";
 import { badges, clock } from "./state/selectors.ts";
 
 /** 1 real second = 12 simulated seconds at 1×. */
@@ -57,6 +58,8 @@ export function App() {
   const [now, setNow] = useState(engine.now);
 
   const [selected, setSelected] = useState<string>(THESEUS_ID);
+  // Live screenshots of the employees' browsers (desktop app only).
+  useEffect(() => startFrames(bridge()?.agent), []);
   const [seen, setSeen] = useState<Record<string, number>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [playing, setPlaying] = useState(true);

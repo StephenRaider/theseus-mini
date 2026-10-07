@@ -15,9 +15,10 @@
     "agent": "tsx src/agent.ts"
   },
   "dependencies": {
-    "@theseus/protocol": "workspace:*",
+    "@theseus/browser": "workspace:*",
     "@theseus/core": "workspace:*",
     "@theseus/kaveri": "workspace:*",
-    "@theseus/pack-vendor-integrity": "workspace:*"
+    "@theseus/pack-vendor-integrity": "workspace:*",
+    "@theseus/protocol": "workspace:*"
   }
 }

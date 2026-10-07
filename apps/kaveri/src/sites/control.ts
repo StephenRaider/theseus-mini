@@ -10,6 +10,7 @@ const SITE_INFO: Record<Exclude<SiteKey, "control">, { name: string; what: strin
   gst: { name: "GST Portal", what: "GSTIN status & legal name" },
   udyam: { name: "Udyam Registration", what: "MSME category verification" },
   eproc: { name: "Kaveri eProcure", what: "Tender T-2026-14 · bidder documents · EMD guarantees" },
+  ap: { name: "Kaveri FinDesk", what: "Legacy AP invoice register: web forms only, no API · sessions expire" },
 };
 
 /**

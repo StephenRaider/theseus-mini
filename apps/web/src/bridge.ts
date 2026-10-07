@@ -47,6 +47,16 @@ export interface AgentSnapshot {
   events: TheseusEvent[];
 }
 
+/** A screenshot of an employee's browser after an action (computer use, live view). */
+export interface BrowserFrame {
+  employeeId: string;
+  url: string;
+  title: string;
+  /** JPEG, base64. */
+  jpeg: string;
+  ts: string;
+}
+
 /** The live employees (apps/server/src/host.ts, run by the desktop app in its own process). */
 export interface AgentBridge {
   init(): Promise<AgentSnapshot>;
@@ -56,6 +66,9 @@ export interface AgentBridge {
   onEvent(cb: (e: TheseusEvent) => void): () => void;
   onStatus(cb: (s: { info: AgentInfo | null; error: string | null }) => void): () => void;
   onReset(cb: () => void): () => void;
+  /** Latest browser frame of each employee. */
+  frames(): Promise<BrowserFrame[]>;
+  onFrame(cb: (f: BrowserFrame) => void): () => void;
 }
 
 export interface TheseusBridge {

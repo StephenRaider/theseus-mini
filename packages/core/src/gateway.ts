@@ -64,7 +64,19 @@ export interface Tool<I = any, O = any> {
    */
   protective?: boolean;
   /** Entity keys this call touches ("vendor:V-101"), used by standing constraints. */
-  subjects?(input: I): string[] | Promise<string[]>;
+  subjects?(input: I, ctx: CallContext): string[] | Promise<string[]>;
+  /**
+   * Risk of THIS call, when it depends on the input (a browser click on
+   * "Search" is a read, on "Post to ledger" irreversible). Defaults to `risk`.
+   */
+  riskOf?(input: I, ctx: CallContext): RiskTier | Promise<RiskTier>;
+  /**
+   * Make an input replayable later (for an approval decided minutes from now):
+   * e.g. a browser click pins what element the ref pointed at when asked.
+   */
+  pin?(input: I, ctx: CallContext): Promise<I>;
+  /** What this call would do, in words and fields, for an approval card. */
+  explain?(input: I, ctx: CallContext): Promise<{ summary: string; fields?: { label: string; value: string }[] }>;
   run(input: I, ctx: ToolRunContext): Promise<O>;
 }
 
@@ -90,8 +102,8 @@ export interface StandingConstraint {
 }
 
 export type GatewayResult<O = unknown> =
-  | { ok: true; callId: string; data: O; evidenceIds: string[]; replayed?: boolean }
-  | { ok: false; callId: string; error: ToolError; blockedBy?: StandingConstraint };
+  | { ok: true; callId: string; data: O; evidenceIds: string[]; replayed?: boolean; risk?: RiskTier }
+  | { ok: false; callId: string; error: ToolError; blockedBy?: StandingConstraint; needsApproval?: { risk: RiskTier } };
 
 export interface ToolDescription {
   name: string;
@@ -185,8 +197,8 @@ export class ToolGateway {
       );
       return r;
     };
-    const fail = (cls: ErrorClass, message: string, hint?: string, blockedBy?: StandingConstraint) =>
-      finish({ ok: false, callId, error: { class: cls, message, ...(hint ? { hint } : {}) }, ...(blockedBy ? { blockedBy } : {}) });
+    const fail = (cls: ErrorClass, message: string, hint?: string, blockedBy?: StandingConstraint, needsApproval?: { risk: RiskTier }) =>
+      finish({ ok: false, callId, error: { class: cls, message, ...(hint ? { hint } : {}) }, ...(blockedBy ? { blockedBy } : {}), ...(needsApproval ? { needsApproval } : {}) });
 
     // 1. exists + allowed
     const tool = this.tools.get(name);
@@ -198,13 +210,22 @@ export class ToolGateway {
       return fail("validation", `Invalid input for ${name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; ")}`);
     const input = parsed.data;
 
-    // 3. irreversible needs a human approval
-    if (tool.risk === "irreversible" && !ctx.approval?.decidedBy?.startsWith("user"))
-      return fail("policy_violation", `${name} is irreversible and needs your approval first`);
+    // 3. irreversible needs a human approval (the risk can depend on the call: a click on "Post")
+    let risk: RiskTier = tool.risk;
+    if (tool.riskOf) {
+      try {
+        risk = await tool.riskOf(input, ctx);
+      } catch (e) {
+        if (e instanceof ToolFailure) return fail(e.cls, e.message, e.hint);
+        throw e;
+      }
+    }
+    if (risk === "irreversible" && !ctx.approval?.decidedBy?.startsWith("user"))
+      return fail("policy_violation", `${name} is irreversible and needs your approval first`, undefined, undefined, { risk });
 
     // 4. standing constraints protect what the user told us not to touch
-    if (tool.risk !== "read" && !tool.protective) {
-      const subjects = tool.subjects ? await tool.subjects(input) : [];
+    if (risk !== "read" && !tool.protective) {
+      const subjects = tool.subjects ? await tool.subjects(input, ctx) : [];
       const c = this.blocking(ctx.employeeId, subjects, ctx.taskId, ctx.itemId);
       if (c) return fail("policy_violation", `Blocked by your instruction: "${c.text}"`, undefined, c);
     }
@@ -231,14 +252,14 @@ export class ToolGateway {
     for (let attempt = 0; ; attempt++) {
       try {
         const data = (await tool.run(input, runCtx)) as O;
-        const r: GatewayResult<O> = { ok: true, callId, data, evidenceIds };
+        const r: GatewayResult<O> = { ok: true, callId, data, evidenceIds, risk };
         if (key) this.done.set(key, { data, evidenceIds });
         return finish(r);
       } catch (e) {
         const cls: ErrorClass = e instanceof ToolFailure ? e.cls : "fatal";
         const error: ToolError = { class: cls, message: (e as Error).message, ...(e instanceof ToolFailure && e.hint ? { hint: e.hint } : {}) };
         const policy = RETRY_POLICY[cls];
-        const safeToRepeat = tool.idempotent || tool.risk === "read" || !!key;
+        const safeToRepeat = tool.idempotent || risk === "read" || !!key;
         if (cls === "transient" && safeToRepeat && attempt < policy.maxRetries) {
           ctx.onRetry?.(attempt + 1, error);
           await sleep(policy.backoffMs * 2 ** attempt);

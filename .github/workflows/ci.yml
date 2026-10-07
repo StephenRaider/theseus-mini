@@ -16,4 +16,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Computer-use tests drive a real Chromium (headless).
+      - run: pnpm browser:install --with-deps
       - run: pnpm check # typecheck every package + all tests

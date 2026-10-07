@@ -29,6 +29,8 @@ async function wire() {
     onEvent: (cb) => (listeners.add(cb), () => listeners.delete(cb)),
     onStatus: () => () => {},
     onReset: () => () => {},
+    frames: async () => [],
+    onFrame: () => () => {},
   };
   const engine = new LiveEngine(bridge);
   engine.start();

@@ -72,5 +72,22 @@ export const RolePackManifest = z.object({
   scope: z
     .object({ does: z.array(z.string()).default([]), does_not: z.array(z.string()).default([]) })
     .default({ does: [], does_not: [] }),
+  /**
+   * Risk of actions in web apps (browser clicks), by the button's label and
+   * where it submits to. A click no rule matches is judged by what it does:
+   * a link or a GET form is a read, a POST form a write.
+   */
+  ui_risks: z
+    .array(
+      z.object({
+        label: z.string().describe("Regex on the button / link text, case-insensitive"),
+        url: z.string().optional().describe("Regex on the URL it submits to or opens"),
+        risk: RiskTier,
+        why: z.string().optional(),
+      }),
+    )
+    .default([]),
+  /** Web apps the employee may open in its browser (keys of the company's sites). */
+  apps: z.array(z.object({ key: z.string(), label: z.string(), note: z.string().optional() })).default([]),
 });
 export type RolePackManifest = z.infer<typeof RolePackManifest>;

@@ -17,7 +17,8 @@
     "app": "pnpm --filter @theseus/desktop dev",
     "app:prod": "pnpm --filter @theseus/desktop start",
     "web": "pnpm --filter @theseus/web dev",
-    "agent": "tsx apps/server/src/agent.ts"
+    "agent": "tsx apps/server/src/agent.ts",
+    "browser:install": "pnpm --filter @theseus/browser exec playwright-core install chromium"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

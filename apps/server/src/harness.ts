@@ -1,5 +1,6 @@
 import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { BrowserPool, type BrowserPoolOptions } from "@theseus/browser";
 import { EventLog, GeminiAdapter, Kernel, RateLimiter, ScriptedModel, withCache, withRateLimit, withTrace, type ModelAdapter } from "@theseus/core";
 import { createVendorIntegrityRuntime } from "@theseus/pack-vendor-integrity/runtime";
 import type { World } from "./world.ts";
@@ -9,12 +10,33 @@ import type { World } from "./world.ts";
  * model + a world. The same function serves the CLI, the tests and (M5) the
  * desktop app.
  */
-export async function createHarness(opts: { world: World; model: ModelAdapter; log?: EventLog; approver?: string; sleep?: (ms: number) => Promise<void>; employeeName?: string; stepDelayMs?: number }) {
+export interface HarnessOptions {
+  world: World;
+  model: ModelAdapter;
+  log?: EventLog;
+  approver?: string;
+  sleep?: (ms: number) => Promise<void>;
+  employeeName?: string;
+  stepDelayMs?: number;
+  /**
+   * Computer use: give the employees a real browser (Chromium via Playwright)
+   * limited to the world's sites. Needs a world whose sites listen on ports.
+   */
+  browser?: boolean | Omit<BrowserPoolOptions, "allowOrigins">;
+}
+
+export async function createHarness(opts: HarnessOptions) {
   const employeeId = "emp_1";
+  let pool: BrowserPool | undefined;
+  if (opts.browser) {
+    if (!opts.world.browsable) throw new Error("Computer use needs a world a browser can reach: inProcessWorld({ listen: true }) or the live world");
+    pool = new BrowserPool({ ...(typeof opts.browser === "object" ? opts.browser : {}), allowOrigins: Object.values(opts.world.urls) });
+  }
   const runtime = await createVendorIntegrityRuntime({
     client: { urls: opts.world.urls, actor: `agent:${employeeId}`, fetch: opts.world.fetch },
     workspaceDir: opts.world.workspaceDir,
     today: opts.world.today,
+    ...(pool ? { browser: { pool, urls: opts.world.urls } } : {}),
   });
   const kernel = new Kernel({
     pack: runtime,
@@ -25,7 +47,12 @@ export async function createHarness(opts: { world: World; model: ModelAdapter; l
     ...(opts.stepDelayMs ? { stepDelayMs: opts.stepDelayMs } : {}),
   });
   const employee = kernel.createEmployee({ id: employeeId, name: opts.employeeName ?? "Employee 1" });
-  return { kernel, runtime, employee };
+  /** Close the browser and the world's servers. */
+  const close = async () => {
+    await pool?.close();
+    await opts.world.close();
+  };
+  return { kernel, runtime, employee, browser: pool, close };
 }
 
 export const REPO_ROOT = join(import.meta.dirname, "../../..");

@@ -1,4 +1,5 @@
-import { FileSandbox, loadRolePack, type OrientIndex, type OrientSource, type PackRuntime } from "@theseus/core";
+import type { BrowserPool } from "@theseus/browser";
+import { FileSandbox, browserTools, loadRolePack, type OrientIndex, type OrientSource, type PackRuntime } from "@theseus/core";
 import type { PlanItem } from "@theseus/protocol";
 import { PACK_DIR } from "../index.ts";
 import { nameSimilarity, normalizeName } from "../matchers/names.ts";
@@ -22,6 +23,12 @@ export interface VendorIntegrityOptions {
   workspaceDir: string;
   /** The world's date (scenario date). */
   today: string;
+  /**
+   * Computer use: a browser and the addresses of the company's web apps
+   * (keys as in pack.yaml `apps`). Without it the employee works through
+   * APIs and files only.
+   */
+  browser?: { pool: BrowserPool; urls: Record<string, string> };
 }
 
 export async function createVendorIntegrityRuntime(opts: VendorIntegrityOptions): Promise<PackRuntime & { directory: Directory }> {
@@ -32,12 +39,42 @@ export async function createVendorIntegrityRuntime(opts: VendorIntegrityOptions)
   const tools = vendorIntegrityTools({ client, sandbox, rootId: "workspace", dir, today: opts.today });
   const vendorName = (id: string) => dir.vendors.get(id)?.legalName;
 
+  /** Vendors (and lines) a piece of page text is about: lets standing constraints guard browser clicks too. */
+  const subjectsIn = (text: string): string[] => {
+    const out = new Set<string>();
+    for (const id of text.toUpperCase().match(/\bV-\d{3}\b/g) ?? []) if (dir.vendors.has(id)) out.add(vendorKey(id));
+    const t = ` ${normalizeName(text)} `;
+    for (const v of dir.vendors.values()) {
+      const n = normalizeName(v.legalName);
+      if (n.length >= 6 && t.includes(` ${n} `)) (out.add(vendorKey(v.id)), out.add(nameKey(v.legalName)));
+    }
+    return [...out];
+  };
+  const apps = opts.browser
+    ? manifest.apps.filter((a) => opts.browser!.urls[a.key]).map((a) => ({ label: a.label, url: opts.browser!.urls[a.key]!, ...(a.note ? { note: a.note } : {}) }))
+    : [];
+  if (opts.browser)
+    tools.push(
+      ...browserTools({
+        pool: opts.browser.pool,
+        sandbox,
+        rootId: "workspace",
+        rules: manifest.ui_risks,
+        subjectsIn: (text) => {
+          if (!dir.vendors.size) return []; // the directory fills on the first look around
+          return subjectsIn(text);
+        },
+      }),
+    );
+
   const runtime: PackRuntime & { directory: Directory } = {
     manifest,
     playbooks,
     tools,
     directory: dir,
     today: () => opts.today,
+    apps,
+    subjectsIn,
 
     handlers: { "payment-batch-check": batchHandlers, "onboard-contractor": onboardHandlers },
 
@@ -93,6 +130,7 @@ export async function createVendorIntegrityRuntime(opts: VendorIntegrityOptions)
       const ranked = [...messages].sort((a, b) => score(b) - score(a) || b.receivedAt.localeCompare(a.receivedAt)).slice(0, 25);
       for (const m of ranked)
         sources.push({ kind: "email", ref: `email:${m.id}`, label: m.subject, detail: `from ${m.fromName} <${m.from}>${m.attachments.length ? `, ${m.attachments.length} attachment(s)` : ""}`, date: m.receivedAt.slice(0, 10) });
+      for (const a of apps) sources.push({ kind: "app", ref: `app:${a.url}`, label: a.label, detail: `${a.url}${a.note ? ` · ${a.note}` : ""}` });
       const { files } = await call<{ files: { path: string; modified: string }[] }>("files.list", {}).catch(() => ({ files: [] }));
       for (const f of files.slice(0, 30)) sources.push({ kind: "file", ref: `file:${f.path}`, label: f.path, date: f.modified.slice(0, 10) });
       return { today: opts.today, sources };

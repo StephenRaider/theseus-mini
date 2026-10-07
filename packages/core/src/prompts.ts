@@ -29,9 +29,9 @@ export interface OrientIndex {
 export const RouteDecision = z.object({
   inScope: z.boolean().describe("false if the request is outside this role's scope"),
   mode: z
-    .enum(["work", "about_me", "answer", "draft", "lookup"])
+    .enum(["work", "operate", "about_me", "answer", "draft", "lookup"])
     .optional()
-    .describe("work = do something with the company's records (default) · lookup = tell me about specific named vendors/tenders · about_me = a question about you, your skills or how you work · answer = a general question you can answer without any records · draft = write a letter, note, email or document"),
+    .describe("work = do something with the company's records (default) · operate = a one-off job done by hand across the systems (find, read, type into a web app, submit) · lookup = tell me about specific named vendors/tenders · about_me = a question about you, your skills or how you work · answer = a general question you can answer without any records · draft = write a letter, note, email or document"),
   lookup: z.object({ subjects: z.array(z.string()).describe("The vendors / tenders named, EXACTLY as the user wrote them") }).optional().describe("For mode=lookup"),
   answer: z.string().optional().describe("For mode=answer: the answer, 2–6 sentences"),
   draft: z
@@ -111,6 +111,7 @@ export function routePrompt(args: {
     "- A general question about the job you can answer without looking at any record (\"what is TDS under 194C?\") → mode=answer with the answer. If it needs the company's records, it's work.",
     "- Write / prepare / draft a letter, note, email or document → mode=draft, with draft.subjects. NEVER run a playbook to write a document.",
     "- Information about specific NAMED vendors or tenders (\"everything on X\", \"X's bank details\", \"is X debarred?\") → mode=lookup with lookup.subjects.",
+    "- A ONE-OFF job you would do by hand across the systems, step by step: find something (an email, an invoice, a file), read values from it, enter them into a web app (e.g. FinDesk, which has no API), submit or post a form, download or upload a file → mode=operate. Not for checks over a whole list of records (that's work).",
     "- Otherwise mode=work:",
     "- A whole playbook fits → tier 1 with its playbookId.",
     "- The user wants only part of a playbook (\"only check…\", \"just the TDS\") → tier 2, playbookId and the stepIds asked for.",

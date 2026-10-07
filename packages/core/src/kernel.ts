@@ -25,9 +25,25 @@ import {
 } from "@theseus/protocol";
 import { createHash } from "node:crypto";
 import type { z } from "zod";
-import { ToolGateway, type EvidenceInput, type GatewayResult, type StandingConstraint, type Tool } from "./gateway.ts";
+import { ToolGateway, previewOf, type EvidenceInput, type GatewayResult, type StandingConstraint, type Tool } from "./gateway.ts";
 import { EventLog, IdMaker, type Clock } from "./log.ts";
 import { ModelError, generateJson, type ModelAdapter, type ModelRequest, type ModelResponse } from "./model.ts";
+import {
+  OPERATE_LIMITS,
+  OperatePlan,
+  OperateTurn,
+  OperateVerify,
+  appearsIn,
+  argsLine,
+  operatePlanPrompt,
+  operateTurnPrompt,
+  operateVerifyPrompt,
+  resultText,
+  sourceOf,
+  type Fact,
+  type OperateState,
+  type Seen,
+} from "./operate.ts";
 import {
   Program,
   allTrue,
@@ -89,6 +105,8 @@ export type StepOutcome =
   | { status: "hold"; reason: string; note?: string; evidenceIds?: string[] }
   | { status: "failed"; note: string; evidenceIds?: string[] }
   | { status: "skipped"; note: string }
+  /** Not finished, run this cell again later (e.g. interrupted by a pause or a message). */
+  | { status: "pending"; note?: string }
   | { status: "needs_you"; note: string; evidenceIds?: string[]; approval?: ApprovalAsk; question?: QuestionAsk };
 
 /** A failed tool call inside a step (thrown by ctx.call). */
@@ -162,6 +180,10 @@ export interface PackRuntime {
   orient(ctx: { request: string; call: PackCtx["call"] }): Promise<OrientIndex>;
   /** The world's "today" (the scenario date, not the wall clock). */
   today(): string;
+  /** Web apps the employee can open in its browser (computer use), with their addresses. */
+  apps?: { label: string; url: string; note?: string }[];
+  /** Entity keys mentioned anywhere in a piece of text (page text, form values). */
+  subjectsIn?(text: string): string[];
   /** Turn words ("Shree Ganesh") into entity keys, for steers and constraints. */
   resolveTarget?(words: string, ctx: { plan?: Plan; shared: Record<string, any> }): { label: string; subjects: string[] } | null;
   /** Entity keys of a plan item, so a constraint can find the items it covers. */
@@ -217,6 +239,8 @@ interface TaskRun {
   plan?: Plan;
   playbook?: Playbook;
   program?: Program;
+  /** Operate mode (computer use): subgoals worked one action at a time. */
+  operate?: OperateState;
   params: Record<string, string>;
   shared: Record<string, any>;
   itemData: Map<string, Record<string, any>>;
@@ -709,6 +733,7 @@ export class Kernel {
       await this.draftDocument(run, decision);
       return false;
     }
+    if (decision.mode === "operate") return this.planOperate(run, index, decision);
 
     const assumptions = [...decision.assumptions];
     for (const q of decision.questions.filter((x) => x.default)) {
@@ -1115,7 +1140,11 @@ export class Kernel {
     const onFail: OnFail = step?.on_fail ?? "fail_item";
     let outcome: StepOutcome;
     try {
-      const handler = run.program ? this.programHandler(run.program.steps.find((s) => s.id === stepId)!) : this.pack.handlers[run.playbook!.id]?.[stepId];
+      const handler = run.operate
+        ? this.operateHandler(run, stepId)
+        : run.program
+          ? this.programHandler(run.program.steps.find((s) => s.id === stepId)!)
+          : this.pack.handlers[run.playbook!.id]?.[stepId];
       if (!handler) throw new StepFailure({ class: "fatal", message: `No handler for step "${stepId}"` });
       outcome = await handler(this.stepCtx(run, item, stepId));
       run.fatalStreak = 0;
@@ -1169,6 +1198,9 @@ export class Kernel {
         return;
       case "skipped":
         this.patch(run, { op: "set_cell", itemId, stepId, state: "skipped", note: o.note }, actor);
+        return;
+      case "pending":
+        this.patch(run, { op: "set_cell", itemId, stepId, state: "pending", ...(o.note ? { note: o.note } : {}) }, actor);
         return;
       case "needs_you": {
         this.patch(run, { op: "set_cell", itemId, stepId, state: "needs_you", note: o.note, ...ev }, actor);
@@ -1362,6 +1394,341 @@ export class Kernel {
     };
   }
 
+  /* ---- operate (computer use): subgoals worked one action at a time */
+
+  /** Plan the subgoals once; each becomes a row of the grid (Do · Proof). */
+  private async planOperate(run: TaskRun, index: OrientIndex, decision: RouteDecision): Promise<boolean> {
+    let plan: OperatePlan;
+    try {
+      plan = await this.json("operate.plan", this.system(run), operatePlanPrompt({ request: run.task.request, goal: decision.goal, index, tools: this.gateway.describe() }), OperatePlan, run.task.id);
+    } catch (e) {
+      this.say(run, `I couldn't plan this: ${modelProblem(e)}`);
+      this.setStatus(run, "failed", (e as Error).message);
+      return false;
+    }
+    run.operate = { goal: decision.goal, plan, facts: [], seen: [], turns: 0, inbox: [], notes: [], answers: {} };
+    const assumptions = [...decision.assumptions, ...plan.assumptions];
+    run.plan = createPlan({ taskId: run.task.id, playbookId: "operate", playbookVersion: 1, steps: [{ id: "work", title: "Do" }, { id: "check", title: "Proof" }] });
+    this.emitOrient(run, index, decision, assumptions);
+    this.updateTask(run, {
+      goal: decision.goal,
+      successCriteria: (plan.successCriteria.length ? plan.successCriteria : decision.successCriteria.length ? decision.successCriteria : [decision.goal]).map((t, i) => ({ id: `c${i + 1}`, text: t })),
+      playbookId: "operate",
+      tier: 3,
+      assumptions,
+    });
+    this.emit({ type: "plan.created", payload: run.plan }, `employee:${run.employeeId}`, { employeeId: run.employeeId, taskId: run.task.id });
+    this.patch(run, { op: "add_items", items: plan.subgoals.map((sg, i) => ({ id: `s${i + 1}`, label: sg.title.slice(0, 80), ref: `s${i + 1}`, held: false })) }, `employee:${run.employeeId}`);
+    this.say(
+      run,
+      [
+        `I'll do this by hand in our systems, one step at a time:\n${plan.subgoals.map((sg, i) => `${i + 1}. ${sg.title}`).join("\n")}`,
+        assumptions.length ? `Assumptions: ${assumptions.join(" · ")}` : "",
+        "Anything that can't be undone waits for your OK. You can message me while I work.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    return true;
+  }
+
+  /** Something that should stop the loop between two actions: a pause, a cancel, or queued plan edits / messages. */
+  private interrupted(run: TaskRun): boolean {
+    return run.paused || run.cancelled || run.queue.length > 0;
+  }
+
+  /** Later subgoals wait (held) while this one needs you; released when it's done. */
+  private blockLater(run: TaskRun, idx: number, why: string) {
+    for (const it of run.plan!.items.slice(idx + 1)) {
+      if (it.held || ["done", "skipped"].includes(itemStatus(run.plan!, it.id))) continue;
+      run.queue.push({ patch: { op: "hold_item", itemId: it.id, reason: `Waits for step ${idx + 1}: ${why}` }, actor: `employee:${run.employeeId}` });
+    }
+  }
+  private unblockLater(run: TaskRun) {
+    for (const it of run.plan!.items) if (it.held && it.holdReason?.startsWith("Waits for step")) run.queue.push({ patch: { op: "release_item", itemId: it.id }, actor: `employee:${run.employeeId}` });
+  }
+
+  private operateHandler(run: TaskRun, stepId: string): StepHandler {
+    const op = run.operate!;
+    if (stepId === "check")
+      return async (ctx) => {
+        const proof = ctx.data.proof as string | undefined;
+        if (!proof) return { status: "done", note: "No proof recorded" };
+        ctx.check("proof_seen", ctx.data.proofSeen ? "pass" : "uncertain", proof);
+        return { status: "done", note: `${ctx.data.proofSeen ? "✓ seen" : "? not seen"}: “${proof.slice(0, 120)}”` };
+      };
+    return async (ctx) => {
+      const idx = Number(ctx.item.id.slice(1)) - 1;
+      const title = op.plan.subgoals[idx]!.title;
+      const actor: Actor = `employee:${run.employeeId}`;
+      const callCtx = {
+        employeeId: run.employeeId,
+        taskId: run.task.id,
+        itemId: ctx.item.id,
+        stepId,
+        onRetry: (attempt: number, err: ToolError) => this.patch(run, { op: "set_cell", itemId: ctx.item.id, stepId, state: "retrying", note: `Retry ${attempt}: ${err.message}` }, actor),
+      };
+      const answers = Object.values(ctx.answers);
+      ctx.data.turns ??= 0;
+      ctx.data.bounces ??= 0;
+      const record = (tool: string, args: Record<string, unknown>, ok: boolean, text: string, summary: string): Seen => {
+        const s: Seen = { turn: op.turns, subgoal: idx, tool, args, ok, text, summary };
+        op.seen.push(s);
+        return s;
+      };
+
+      for (;;) {
+        if (this.interrupted(run)) return { status: "pending", note: "Interrupted; I'll pick this up again" };
+        if (ctx.data.turns >= OPERATE_LIMITS.turnsPerSubgoal || op.turns >= OPERATE_LIMITS.turnsPerTask) {
+          const last = op.seen.at(-1);
+          this.blockLater(run, idx, "stuck");
+          return {
+            status: "needs_you",
+            note: `Stuck after ${ctx.data.turns} actions`,
+            question: { key: `stuck${op.turns}`, text: `I've taken ${ctx.data.turns} actions on "${title}" without finishing${last ? ` (last: ${last.tool} → ${last.summary})` : ""}. How should I go on?` },
+          };
+        }
+        let turn: OperateTurn;
+        try {
+          turn = await this.json(
+            "operate.step",
+            this.system(run),
+            operateTurnPrompt({ request: run.task.request, today: this.pack.today(), state: op, subgoal: idx, apps: this.pack.apps ?? [], tools: this.gateway.describe(), ...(op.seen.length ? { last: op.seen.at(-1)! } : {}), answers }),
+            OperateTurn,
+            run.task.id,
+          );
+        } catch (e) {
+          this.blockLater(run, idx, "the model is unavailable");
+          return { status: "needs_you", note: `Model unavailable: ${modelProblem(e)}`, question: { key: `model${op.turns}`, text: `I can't think right now (${modelProblem(e)}). Reply "go on" when it's back and I'll continue "${title}".` } };
+        }
+        op.turns++;
+        ctx.data.turns++;
+        op.notes = [];
+
+        // Memory: only what was really seen, with the exact quote.
+        for (const r of turn.remember ?? []) {
+          const src = sourceOf(r, op.seen);
+          if (!src) {
+            op.notes.push(`NOT remembered "${r.key}": the quote "${r.quote.slice(0, 80)}" isn't in anything you were shown. Copy text exactly from a result.`);
+            continue;
+          }
+          const fact: Fact = { key: r.key, value: r.value, quote: r.quote, source: { tool: src.tool, args: src.args }, turn: src.turn };
+          fact.evidenceId = this.addEvidence(run, { kind: "text", summary: `${r.key}: ${r.value}`, source: `${src.tool} ${argsLine(src.args)}`, fields: { quote: r.quote } });
+          op.facts = [...op.facts.filter((f) => f.key !== r.key), fact];
+        }
+        if (turn.report) op.report = turn.report;
+
+        if (turn.cannot) {
+          for (const it of run.plan!.items.slice(idx + 1))
+            if (!["done", "skipped"].includes(itemStatus(run.plan!, it.id))) run.queue.push({ patch: { op: "skip_item", itemId: it.id, reason: `Not done: step ${idx + 1} couldn't be completed` }, actor });
+          this.say(run, `I can't complete "${title}": ${turn.cannot}`);
+          return { status: "needs_you", note: `Can't: ${turn.cannot}` };
+        }
+        if (turn.askUser) {
+          this.blockLater(run, idx, "a question for you");
+          return { status: "needs_you", note: turn.askUser, question: { key: `ask${op.turns}`, text: turn.askUser } };
+        }
+        if (turn.subgoalDone) {
+          const proof = turn.subgoalDone.proof;
+          const startTurn = op.seen.find((s) => s.subgoal === idx)?.turn ?? op.turns;
+          const recent = op.seen.filter((s) => s.ok && s.turn >= startTurn - 1);
+          const seen = recent.some((s) => appearsIn(proof, s.text)) || op.facts.some((f) => appearsIn(proof, f.quote));
+          if (!seen && ctx.data.bounces < 2) {
+            ctx.data.bounces++;
+            op.notes.push(`You said "${title}" is done, but "${proof.slice(0, 100)}" isn't in anything you were shown. Finish the work or quote the proof exactly.`);
+            continue;
+          }
+          ctx.data.proof = proof;
+          ctx.data.proofSeen = seen;
+          this.unblockLater(run);
+          return { status: "done", note: turn.thinking.slice(0, 200) };
+        }
+        if (!turn.action) {
+          op.notes.push("You gave no action. Choose ONE action, or set subgoalDone / askUser / cannot.");
+          continue;
+        }
+
+        // Act: one tool call through the gateway (risk, approvals, constraints, retries, evidence).
+        const { tool } = turn.action;
+        let args: Record<string, unknown> = turn.action.args;
+        this.patch(run, { op: "set_cell", itemId: ctx.item.id, stepId, state: "running", note: turn.thinking.slice(0, 200) }, actor);
+        const t = this.gateway.get(tool);
+        if (!t) {
+          record(tool, args, false, `FAILED: there is no tool "${tool}". Use one from the TOOLS list.`, "no such tool");
+          continue;
+        }
+        let r = await this.gateway.call(tool, args, callCtx);
+        if (!r.ok && r.error.class === "validation" && r.error.message.startsWith("Invalid input")) {
+          const coerced = coerceArgs(args);
+          const r2 = await this.gateway.call(tool, coerced, callCtx);
+          if (r2.ok || !r2.error.message.startsWith("Invalid input")) (r = r2), (args = coerced);
+        }
+        if (!r.ok && r.needsApproval) {
+          const input = t.pin ? await t.pin(t.input.parse(args), callCtx).catch(() => args) : args;
+          const ex = t.explain ? await t.explain(input, callCtx).catch(() => undefined) : undefined;
+          record(tool, args, false, "Waiting for the user's approval.", "waiting for approval");
+          this.blockLater(run, idx, "your approval");
+          this.say(run, `I need your OK to: ${ex?.summary ?? `${tool} ${argsLine(args)}`}`);
+          return {
+            status: "needs_you",
+            note: `Waiting for your approval: ${ex?.summary ?? tool}`,
+            approval: {
+              title: ex?.summary ?? `${tool} ${argsLine(args)}`,
+              reason: turn.thinking,
+              toolCall: { tool, input },
+              diff: (ex?.fields ?? []).map((f) => ({ field: f.label, before: null, after: f.value })),
+              risk: "irreversible",
+              onApproved: (result) => {
+                record(tool, args, true, resultText(result), `approved by you and done: ${this.viewSummary(result)}`);
+                return { status: "pending", note: "Approved and done; continuing" };
+              },
+              onRejected: () => {
+                record(tool, args, false, "The user REJECTED this action. Do not try it again; finish without it or explain why you can't.", "rejected by you");
+                return { status: "pending", note: "You rejected it; continuing without it" };
+              },
+            },
+          };
+        }
+        if (!r.ok && r.blockedBy) {
+          const reason = `You said: "${r.blockedBy.text}"`;
+          record(tool, args, false, `BLOCKED by the user's instruction: ${r.blockedBy.text}`, "blocked by your instruction");
+          return { status: "hold", reason, note: `Held, not done: ${reason}` };
+        }
+        let text = r.ok ? resultText(r.data) : `FAILED (${r.error.class}): ${r.error.message}${r.error.hint ? `\nHINT: ${r.error.hint}` : ""}`;
+        if (!r.ok && r.error.class === "ui_changed" && tool.startsWith("browser.") && this.gateway.has("browser.look")) {
+          const lk = await this.gateway.call("browser.look", {}, callCtx);
+          if (lk.ok) text += `\nTHE PAGE AS IT IS NOW:\n${resultText(lk.data)}`;
+        }
+        record(tool, args, r.ok, text, r.ok ? this.viewSummary(r.data) : `${r.error.class}: ${r.error.message.slice(0, 120)}`);
+        if (!r.ok) {
+          const sig = `${tool} ${argsLine(args)}`;
+          const same = op.seen.slice(-8).filter((s) => !s.ok && `${s.tool} ${argsLine(s.args)}` === sig).length;
+          if (same >= OPERATE_LIMITS.sameFailure) {
+            this.blockLater(run, idx, "stuck");
+            return {
+              status: "needs_you",
+              note: `Stuck: ${tool} keeps failing (${r.error.message})`,
+              question: { key: `fail${op.turns}`, text: `"${title}": ${tool} failed ${same} times (${r.error.message}). How should I go on?` },
+            };
+          }
+          if (same === 2) op.notes.push("That exact action has now failed twice. Try something different.");
+        }
+        if (this.opts.stepDelayMs) await new Promise((res) => setTimeout(res, this.opts.stepDelayMs));
+      }
+    };
+  }
+
+  /** One line for the history: a page by its title and any alert on it, a record by a short preview. */
+  private viewSummary(data: unknown): string {
+    if (data && typeof data === "object" && "page" in data) {
+      const v = data as { url: string; title: string; status?: number; page: string; downloaded?: string };
+      const alerts = v.page.split("\n").filter((l) => l.trim().startsWith("[alert]")).map((l) => l.trim().slice(8));
+      let path = v.url;
+      try {
+        path = new URL(v.url).pathname;
+      } catch {
+        /* keep the raw url */
+      }
+      return `${v.title} (${path})${v.status && v.status >= 400 ? ` HTTP ${v.status}` : ""}${alerts.length ? ` · ${alerts.join(" · ").slice(0, 160)}` : ""}${v.downloaded ? ` · saved ${v.downloaded}` : ""}`;
+    }
+    return previewOf(data, 140);
+  }
+
+  /**
+   * The verifier for operate runs. It does not trust the run: it (1) re-reads
+   * the SOURCE of every remembered fact and checks the value is still there,
+   * and (2) asks the model for fresh READ calls that would show the outcome,
+   * runs them itself and checks the expected values appear. Only reads run here.
+   */
+  private async verifyOperate(run: TaskRun): Promise<VerifyResult[]> {
+    const op = run.operate!;
+    const results: VerifyResult[] = [];
+    const ctx = { employeeId: run.employeeId, taskId: run.task.id };
+    const rereadable = (tool: string) => this.gateway.get(tool)?.risk === "read" && !["browser.look", "browser.back", "browser.type", "browser.select", "browser.check", "browser.upload"].includes(tool);
+
+    // 1. Facts against their sources, read again.
+    const bySource = new Map<string, Fact[]>();
+    for (const f of op.facts) {
+      if (!rereadable(f.source.tool)) continue;
+      const k = `${f.source.tool} ${JSON.stringify(f.source.args)}`;
+      bySource.set(k, [...(bySource.get(k) ?? []), f]);
+    }
+    for (const facts of bySource.values()) {
+      const src = facts[0]!.source;
+      const r = await this.gateway.call(src.tool, src.args, ctx);
+      if (!r.ok) {
+        results.push({ criterion: `Facts re-read from ${src.tool} ${argsLine(src.args)}`, verdict: "uncertain", detail: `couldn't re-read the source: ${r.error.message}` });
+        continue;
+      }
+      const text = resultText(r.data, 200_000);
+      const missing = facts.filter((f) => !appearsIn(f.value, text) && !appearsIn(f.quote, text));
+      results.push({
+        criterion: `Facts match their source (${src.tool} ${argsLine(src.args)})`,
+        verdict: missing.length ? "fail" : "pass",
+        detail: missing.length ? `not found on a fresh read: ${missing.map((f) => `${f.key}=${f.value}`).join(", ")}` : facts.map((f) => `${f.key}=${f.value}`).join(", "),
+      });
+    }
+
+    // 2. The outcome itself, checked fresh in the systems.
+    const readTools = this.gateway.describe((t) => t.risk === "read" && rereadable(t.name));
+    const actions = op.seen.filter((s) => s.ok).map((s) => `- ${s.tool} ${argsLine(s.args)} → ${s.summary}`).slice(-25);
+    try {
+      const v = await this.json(
+        "operate.verify",
+        this.system(run),
+        operateVerifyPrompt({ request: run.task.request, goal: op.goal, criteria: run.task.successCriteria.map((c) => c.text), facts: op.facts, actions, tools: readTools, apps: this.pack.apps ?? [] }),
+        OperateVerify,
+        run.task.id,
+      );
+      for (const c of v.checks.slice(0, 5)) {
+        if (!rereadable(c.tool) || this.gateway.get(c.tool)?.risk !== "read") {
+          results.push({ criterion: c.criterion, verdict: "uncertain", detail: `the verifier may only read; ${c.tool} isn't a read` });
+          continue;
+        }
+        let r = await this.gateway.call(c.tool, c.args, ctx);
+        if (!r.ok && r.error.class === "validation") r = await this.gateway.call(c.tool, coerceArgs(c.args), ctx);
+        if (!r.ok) {
+          results.push({ criterion: c.criterion, verdict: "uncertain", detail: `couldn't read (${c.tool}): ${r.error.message}` });
+          continue;
+        }
+        const text = resultText(r.data, 200_000);
+        const missing = c.expect.filter((e) => !appearsIn(e, text));
+        results.push({
+          criterion: c.criterion,
+          verdict: missing.length ? "fail" : "pass",
+          detail: missing.length ? `fresh ${c.tool} ${argsLine(c.args)} doesn't show: ${missing.join(", ")}` : `fresh ${c.tool} ${argsLine(c.args)} shows ${c.expect.join(", ")}`,
+        });
+      }
+    } catch (e) {
+      results.push({ criterion: "The outcome, re-read fresh", verdict: "uncertain", detail: `the verifier couldn't plan its checks: ${modelProblem(e)}` });
+    }
+    return results;
+  }
+
+  /** Summary for the manager: what I found (with where), what I changed, what's left, where the evidence is. */
+  private operateReport(run: TaskRun): string {
+    const op = run.operate!;
+    const plan = run.plan!;
+    const facts = op.facts.map((f) => `• ${f.key.replace(/_/g, " ")}: ${f.value} (seen in ${f.source.tool} ${argsLine(f.source.args).slice(0, 70)}: “${f.quote.slice(0, 80)}”)`);
+    const changes = op.seen.filter((s) => s.ok && /approved by you|Saved|posted|created|submitted|draft/i.test(s.summary) && s.tool !== "files.read_text").map((s) => `• ${s.summary}`);
+    const open = plan.items
+      .filter((it) => !["done"].includes(itemStatus(plan, it.id)))
+      .map((it) => `• ${it.label}: ${itemStatus(plan, it.id).replace("_", " ")}${it.holdReason ? ` (${it.holdReason})` : ""}${plan.cells[it.id]!.work!.note ? ` — ${plan.cells[it.id]!.work!.note}` : ""}`);
+    const shots = this.log.ofType("evidence.added").filter((e) => e.taskId === run.task.id && e.payload.kind === "screenshot").length;
+    const facts_and_seen = `${run.task.request} ${JSON.stringify(op.facts)} ${op.seen.map((s) => s.text).join(" ")}`;
+    const summary = op.report && !unsupportedClaims(op.report, facts_and_seen).length ? op.report : undefined;
+    const done = plan.items.every((it) => itemStatus(plan, it.id) === "done");
+    return [
+      summary ?? (done ? `Done: ${op.goal}.` : `Not finished: ${op.goal}.`),
+      facts.length ? `\nWhat I found:\n${facts.join("\n")}` : "",
+      changes.length ? `\nWhat I changed:\n${changes.join("\n")}` : "",
+      open.length ? `\nStill open:\n${open.join("\n")}` : "",
+      shots ? `\nEvidence: ${shots} screenshot${shots === 1 ? "" : "s"} saved in Evidence/${run.task.id}/.` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
   /* ---- conversation lane */
 
   private async converse(st: EmployeeState, text: string) {
@@ -1399,6 +1766,8 @@ export class Kernel {
       this.say(run, response);
     };
 
+    // Hands-on work (operate) reads every instruction you send, at its next action.
+    if (run.operate && (tri.kind === "info" || tri.kind === "steer" || tri.kind === "unclear") && !open.length) run.operate.inbox.push(text);
     switch (tri.kind) {
       case "steer":
         return ack(this.steer(run, tri.action ?? "hold", tri.target ?? text, text, nudgeId));
@@ -1410,7 +1779,7 @@ export class Kernel {
           ack(`Got it, applying that to: ${q.text}`);
           return this.answerQuestion(q.id, text, "user");
         }
-        return ack("Noted.");
+        return ack(run.operate ? "Noted, I'll take that into account from my next step." : "Noted.");
       }
       case "pause":
         this.control(run, "pause");
@@ -1425,6 +1794,7 @@ export class Kernel {
         st.backlog.push(text);
         return ack("I'll take that up as soon as the current task is finished.");
       default:
+        if (run.operate) return ack("Noted, I'll take that into account from my next step.");
         return ack(`I'm not sure what you'd like me to change. I'm still working (${this.status(run.task.id)}). You can say things like "hold X", "skip Y", "pause" or ask a question.`);
     }
   }
@@ -1587,7 +1957,7 @@ export class Kernel {
     let results: VerifyResult[] = [];
     try {
       const v = run.playbook ? this.pack.verify?.[run.playbook.id] : undefined;
-      results = v ? await v(ctx) : run.program ? await this.verifyProgram(run) : genericVerify(plan);
+      results = v ? await v(ctx) : run.operate ? [...genericVerify(plan), ...(await this.verifyOperate(run))] : run.program ? await this.verifyProgram(run) : genericVerify(plan);
     } catch (e) {
       results = [{ criterion: "Verification", verdict: "uncertain", detail: `The verifier couldn't run: ${(e as Error).message}` }];
     }
@@ -1601,7 +1971,8 @@ export class Kernel {
     );
 
     let report: string;
-    if (run.program) report = await this.programReport(run);
+    if (run.operate) report = this.operateReport(run);
+    else if (run.program) report = await this.programReport(run);
     else {
       const r = run.playbook ? this.pack.report?.[run.playbook.id] : undefined;
       report = r ? await Promise.resolve().then(() => r(ctx)).catch((e: Error) => `${genericReport(plan)}\n(The detailed report failed: ${e.message})`) : genericReport(plan);

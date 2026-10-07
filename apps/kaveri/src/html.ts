@@ -132,6 +132,11 @@ export const THEMES = {
     user: "Public verification", font: "'Noto Sans',system-ui,sans-serif",
     vars: { ...LIGHT, accent: "#7A1F2B", "head-bg": "#7A1F2B", "head-text": "#FFFFFF", radius: "4px" },
   }),
+  ap: (nav: Theme["nav"]): Theme => ({
+    key: "ap", name: "Kaveri FinDesk 4.2", tagline: "Accounts Payable · invoice register (legacy)", mark: "F", nav, header: "band",
+    user: "AP desk", font: "Tahoma,Verdana,'Segoe UI',sans-serif",
+    vars: { ...LIGHT, accent: "#1C4E9C", "head-bg": "#2D3E5C", "head-text": "#E6ECF5", bg: "#E9ECF0", radius: "2px" },
+  }),
   eproc: (nav: Theme["nav"]): Theme => ({
     key: "eproc", name: "Kaveri eProcure", tagline: "Tenders · bids · bidder documents", mark: "e", nav, header: "band",
     user: "Procurement (read access: AP)", vars: { ...LIGHT, accent: "#C25E00", "head-bg": "#2B2F36", "head-text": "#FFD9B0" },

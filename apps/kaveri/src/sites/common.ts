@@ -16,6 +16,7 @@ export const PORTS = {
   gst: 4104,
   udyam: 4105,
   eproc: 4106,
+  ap: 4107,
 } as const;
 export type SiteKey = keyof typeof PORTS;
 export const siteUrl = (k: SiteKey, host = "localhost") => `http://${host}:${PORTS[k]}`;

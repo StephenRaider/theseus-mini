@@ -37,7 +37,18 @@ export interface HostInfo {
   suggestions: string[];
 }
 
+/** What the employee's browser showed after an action (live view in the app). */
+export interface BrowserFrame {
+  employeeId: string;
+  url: string;
+  title: string;
+  /** JPEG, base64. */
+  jpeg: string;
+  ts: string;
+}
+
 export const SUGGESTIONS = [
+  "Find the latest invoice from Hoysala Steel, extract the amount and due date, enter it into FinDesk and tell me once it's done",
   "Run the integrity check on this week's payment batch",
   "Empanel the three bidders who qualified on T-2026-14",
   "Only check the GSTINs of the T-14 bidders",
@@ -51,9 +62,21 @@ export class AgentHost {
   private constructor(
     readonly kernel: Kernel,
     readonly info: HostInfo,
+    /** Stop the browser and the world's servers. */
+    readonly close: () => Promise<void>,
   ) {}
 
-  static async create(opts: { mode?: HostMode; workspaceDir?: string; onEvent: (e: TheseusEvent) => void; stepDelayMs?: number; record?: boolean }): Promise<AgentHost> {
+  static async create(opts: {
+    mode?: HostMode;
+    workspaceDir?: string;
+    onEvent: (e: TheseusEvent) => void;
+    /** Live view of each employee's browser (computer use). */
+    onFrame?: (f: BrowserFrame) => void;
+    stepDelayMs?: number;
+    record?: boolean;
+    /** Show the browser window itself (THESEUS_HEADED=1), e.g. for recording a demo. */
+    headed?: boolean;
+  }): Promise<AgentHost> {
     const envFile = join(REPO_ROOT, ".env");
     if (existsSync(envFile)) process.loadEnvFile(envFile);
     const hasKey = !!process.env.GEMINI_API_KEY?.trim();
@@ -65,11 +88,22 @@ export class AgentHost {
       model = scriptedModel();
       note = mode === "live" ? "No GEMINI_API_KEY in .env, so running the demo model instead" : undefined;
     }
-    const world = await inProcessWorld({ ...(opts.workspaceDir ? { workspaceDir: opts.workspaceDir } : {}) });
+    // The sites listen on free local ports so the employees' browser can open them.
+    const world = await inProcessWorld({ ...(opts.workspaceDir ? { workspaceDir: opts.workspaceDir } : {}), listen: true });
     // Flight recorder (.theseus/runs/): off in tests, on in the app.
     const rec = opts.record ? recorder("app") : undefined;
     if (rec) model = rec.trace(model);
-    const { kernel } = await createHarness({ world, model, stepDelayMs: opts.stepDelayMs ?? 250, ...(rec ? { log: rec.log } : {}) });
+    const { kernel, close } = await createHarness({
+      world,
+      model,
+      stepDelayMs: opts.stepDelayMs ?? 250,
+      ...(rec ? { log: rec.log } : {}),
+      browser: {
+        headless: !opts.headed,
+        ...(opts.headed ? { slowMo: 250 } : {}),
+        ...(opts.onFrame ? { onFrame: (employeeId, f) => opts.onFrame!({ employeeId, url: f.url, title: f.title, jpeg: f.jpeg.toString("base64"), ts: new Date().toISOString() }) } : {}),
+      },
+    });
     const info: HostInfo = {
       mode: model.name === "scripted" ? "demo" : "live",
       model: model.name,
@@ -78,7 +112,7 @@ export class AgentHost {
       today: world.today,
       suggestions: SUGGESTIONS,
     };
-    const host = new AgentHost(kernel, info);
+    const host = new AgentHost(kernel, info, close);
 
     // Replay what already happened (Employee 1 was created by the harness), then stream.
     for (const e of kernel.log.events) opts.onEvent(e);
@@ -214,6 +248,8 @@ if (process.send && process.argv[1]?.endsWith("host.ts")) {
       ...(mode ? { mode } : {}),
       ...(process.env.THESEUS_WORKSPACE ? { workspaceDir: process.env.THESEUS_WORKSPACE } : {}),
       onEvent: (event) => send({ type: "event", event }),
+      onFrame: (frame) => send({ type: "frame", frame }),
+      headed: process.env.THESEUS_HEADED === "1",
       record: true,
       ...(process.env.THESEUS_STEP_MS ? { stepDelayMs: Number(process.env.THESEUS_STEP_MS) } : {}),
     });

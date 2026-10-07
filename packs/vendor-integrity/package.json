@@ -12,10 +12,11 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@theseus/browser": "workspace:*",
+    "@theseus/core": "workspace:*",
     "@theseus/protocol": "workspace:*",
     "ifsc": "2.0.50",
     "yaml": "^2.6.0",
-    "zod": "^4.1.0",
-    "@theseus/core": "workspace:*"
+    "zod": "^4.1.0"
   }
 }

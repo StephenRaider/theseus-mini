@@ -9,5 +9,6 @@ console.log(`  Bharat Bank    ${urls.bank}`);
 console.log(`  GST Portal     ${urls.gst}`);
 console.log(`  Udyam Portal   ${urls.udyam}`);
 console.log(`  eProcure       ${urls.eproc}`);
+console.log(`  FinDesk        ${urls.ap}   (legacy AP register: web forms only)`);
 console.log(`\n  Workspace      ${workspaceDir}\n`);
 console.log("Stop with Ctrl+C.");

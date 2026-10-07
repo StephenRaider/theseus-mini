@@ -20,6 +20,8 @@ export function attachPrinter(kernel: Kernel, out: (line: string) => void = (l) 
   const time = (e: TheseusEvent) => c.dim(e.ts.slice(11, 19));
   const label = (taskId: string, itemId: string) => kernel.runs.get(taskId)?.plan?.items.find((i) => i.id === itemId)?.label ?? itemId;
   let done = 0;
+  // Hands-on (operate) runs: print every thought and action, like watching over a shoulder.
+  const operating = (taskId?: string) => !!taskId && kernel.runs.get(taskId)?.plan?.playbookId === "operate";
   return kernel.log.subscribe((e) => {
     switch (e.type) {
       case "message.posted": {
@@ -38,6 +40,8 @@ export function attachPrinter(kernel: Kernel, out: (line: string) => void = (l) 
           if (p.state === "done") done++;
           if (p.state === "failed") out(`${time(e)} ${c.red("✗ failed")} ${label(e.payload.taskId, p.itemId)} · ${p.stepId}: ${p.note ?? ""}`);
           if (p.state === "needs_you") out(`${time(e)} ${c.yellow("● needs you")} ${label(e.payload.taskId, p.itemId)} · ${p.stepId}: ${p.note ?? ""}`);
+          if (p.state === "running" && p.note && p.stepId === "work" && operating(e.payload.taskId)) out(`${time(e)} ${c.dim("💭")} ${p.note}`);
+          if (p.state === "done" && p.stepId === "check" && operating(e.payload.taskId)) out(`${time(e)} ${c.green("✓")} ${label(e.payload.taskId, p.itemId)} ${c.dim(p.note ?? "")}`);
           if (p.state === "retrying") out(`${time(e)} ${c.yellow("↻ retrying")} ${label(e.payload.taskId, p.itemId)} · ${p.stepId}: ${p.note ?? ""}`);
           if (p.state === "done" && p.note?.startsWith("Corrected")) out(`${time(e)} ${c.green("✎")} ${label(e.payload.taskId, p.itemId)}: ${p.note}`);
           if (p.state === "done" && p.note?.startsWith("⚑")) out(`${time(e)} ${c.yellow("⚑")} ${label(e.payload.taskId, p.itemId)}: ${p.note.slice(2)}`);
@@ -62,8 +66,22 @@ export function attachPrinter(kernel: Kernel, out: (line: string) => void = (l) 
       case "nudge.triaged":
         out(`${time(e)} ${c.dim(`message understood as: ${e.payload.kind}${e.payload.detail ? ` (${e.payload.detail})` : ""} [${e.payload.by}]`)}`);
         break;
+      case "tool.called":
+        if (operating(e.payload.taskId)) {
+          const input = Object.entries((e.payload.input ?? {}) as Record<string, unknown>)
+            .filter(([k]) => k !== "expect")
+            .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+            .join(" ");
+          out(`${time(e)}   ${c.cyan("→")} ${e.payload.tool} ${c.dim(input.slice(0, 140))}`);
+        }
+        break;
+      case "evidence.added":
+        if (e.payload.kind === "screenshot") out(`${time(e)}   ${c.dim(`📷 ${e.payload.ref}`)}`);
+        if (e.payload.kind === "text" && operating(e.taskId)) out(`${time(e)}   ${c.dim(`🧠 remembered ${e.payload.summary}`)}`);
+        break;
       case "tool.completed":
-        if (!e.payload.ok && e.payload.error?.class === "policy_violation") out(`${time(e)} ${c.red("⛔ blocked")} ${e.payload.error.message}`);
+        if (!e.payload.ok && e.payload.error?.class === "policy_violation")
+          out(/needs your approval/.test(e.payload.error.message) ? `${time(e)} ${c.yellow("⏸ asks first")} ${e.payload.error.message}` : `${time(e)} ${c.red("⛔ blocked")} ${e.payload.error.message}`);
         break;
       case "model.called":
         out(`${time(e)} ${c.dim(`model: ${e.payload.purpose} ${e.payload.ok ? "ok" : `FAILED (${e.payload.error})`}${e.payload.cached ? " (cached)" : ""} ${(e.payload.durationMs / 1000).toFixed(1)}s`)}`);

@@ -20,7 +20,8 @@ tools:
   - { name: mail.send, risk: irreversible, description: "Send an email outside the company" }
   - { name: doc.extract_fields, risk: read, description: "Extract named fields from a document, with source quotes" }
   - { name: files.list, risk: read, description: "List files in the workspace" }
-  - { name: files.read_text, risk: read, description: "Read a workspace file as text (PDF, Excel, CSV)" }
+  - { name: files.read_text, risk: read, description: "Read a workspace file as text (PDF, Excel, Word, CSV)" }
+  - { name: files.search, risk: read, description: "Search workspace file names and contents" }
   - { name: files.save_text, risk: write, description: "Save a new text/CSV/Markdown file in the workspace (never overwrites)" }
   - { name: files.save_docx, risk: write, description: "Save a new Word document in the workspace (never overwrites)" }
   - { name: eproc.list_tenders, risk: read, description: "List tenders on the e-procurement portal" }
@@ -54,6 +55,35 @@ tools:
   - { name: rules.msme_deadline, risk: read, description: "Compute the MSME 45-day deadline (Sec. 43B(h))" }
   - { name: human.request_approval, risk: read, description: "Ask the user to approve an action, with diff and evidence" }
   - { name: human.create_task, risk: read, description: "Give the user a task only a human can do (e.g. a phone call)" }
+  # Browser (computer use): operate the company's web apps like a person.
+  # Clicks are judged per call (ui_risks below); typing/selecting change nothing until a form is submitted.
+  - { name: browser.open, risk: read, description: "Open a page of a company web app" }
+  - { name: browser.look, risk: read, description: "Look at the current page again" }
+  - { name: browser.click, risk: write, description: "Click a link or button (risk judged per click)" }
+  - { name: browser.type, risk: read, description: "Type into a field (Enter submits: judged like the form)" }
+  - { name: browser.fill_form, risk: read, description: "Fill several form fields at once (no submit)" }
+  - { name: browser.select, risk: read, description: "Choose a drop-down option" }
+  - { name: browser.check, risk: read, description: "Tick / untick a checkbox" }
+  - { name: browser.upload, risk: read, description: "Attach a workspace file to a form" }
+  - { name: browser.back, risk: read, description: "Go back a page" }
+
+# Web apps the employee can open in its browser. FinDesk has no API: forms only.
+apps:
+  - { key: ap, label: "Kaveri FinDesk (AP invoice register)", note: "Legacy: web forms only, no API. Enter supplier invoices here (saved as drafts), then post them to the ledger." }
+  - { key: mail, label: "Kaveri Mail (webmail)", note: "Same mailbox as the mail.* tools" }
+  - { key: erp, label: "Kaveri ERP", note: "Vendor master, payment batches" }
+  - { key: eproc, label: "Kaveri eProcure", note: "Tenders and bidder documents" }
+  - { key: bank, label: "Bharat Bank corporate portal" }
+
+# Risk of clicks in those apps, by button text (and where it submits).
+# Anything not listed: a link / GET form is a read, a POST form is a write.
+ui_risks:
+  - { label: "post to ledger|post invoice", risk: irreversible, why: "posting makes the invoice a payable" }
+  - { label: "^send$|send email|send message", risk: irreversible, why: "an email leaves the company" }
+  - { label: "release|authori[sz]e|approve|activate", risk: irreversible, why: "releases money or activates a record (maker-checker)" }
+  - { label: "delete|remove|cancel invoice", url: "/delete|/remove", risk: irreversible, why: "deletes a record" }
+  - { label: "change bank|update bank", risk: irreversible, why: "bank changes need a call-back and your approval" }
+  - { label: "continue to findesk|sign in|log ?in", risk: read, why: "signing in changes no records" }
 
 # Scope charter (Framework Spec §10): requests outside it are politely refused.
 scope:

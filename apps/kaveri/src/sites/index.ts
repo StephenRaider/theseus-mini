@@ -1,5 +1,6 @@
 import { Kaveri } from "../store.ts";
 import { DEFAULT_WORKSPACE, generateWorkspace } from "../workspace.ts";
+import { apSite } from "./ap.ts";
 import { bankSite } from "./bank.ts";
 import { PORTS, siteUrl, type Site, type SiteKey } from "./common.ts";
 import { controlSite } from "./control.ts";
@@ -20,6 +21,7 @@ export function buildSites(kaveri = new Kaveri(), opts: { workspaceDir?: string 
     gst: gstSite(kaveri),
     udyam: udyamSite(kaveri),
     eproc: eprocSite(kaveri),
+    ap: apSite(kaveri),
   };
 }
 

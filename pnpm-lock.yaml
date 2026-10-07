@@ -79,6 +79,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@theseus/browser':
+        specifier: workspace:*
+        version: link:../../packages/browser
       '@theseus/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -143,9 +146,15 @@ importers:
       '@theseus/protocol':
         specifier: workspace:*
         version: link:../protocol
+      playwright-core:
+        specifier: 1.56.1
+        version: 1.56.1
 
   packages/core:
     dependencies:
+      '@theseus/browser':
+        specifier: workspace:*
+        version: link:../browser
       '@theseus/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -155,6 +164,9 @@ importers:
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.2
       unpdf:
         specifier: ^1.8.1
         version: 1.8.1
@@ -173,6 +185,9 @@ importers:
 
   packs/vendor-integrity:
     dependencies:
+      '@theseus/browser':
+        specifier: workspace:*
+        version: link:../../packages/browser
       '@theseus/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -1462,6 +1477,11 @@ packages:
 
   pizzip@3.3.0:
     resolution: {integrity: sha512-seR2ALUYS4Z0GCs0sVwXWImhBsoCImXpHr+ExNfIZ9G0czvHqpUxlJgwHCl1BBHFyU3nUFmZJPFEEWbpY8cKRg==}
+
+  playwright-core@1.56.1:
+    resolution: {integrity: sha512-hutraynyn31F+Bifme+Ps9Vq59hKuUCz7H1kDOcBs+2oGguKkWTU50bBWrtz34OUWmIwpBTWDxaRPXrIXkgvmQ==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   postcss@8.5.29:
     resolution: {integrity: sha512-49cGhUbXj8Qenv0iTMxA1cFBzxXoctpC9Ujd77t1WcbJIr6nF/eI7g/8MgxrYldFRuAXvja7xQRwavoW7kgrxQ==}
@@ -3094,6 +3114,8 @@ snapshots:
   pizzip@3.3.0:
     dependencies:
       pako: 2.2.0
+
+  playwright-core@1.56.1: {}
 
   postcss@8.5.29:
     dependencies:

@@ -1808,3 +1808,48 @@ textarea {
 .orient__assume {
   margin-top: 6px;
 }
+
+/* ------------------------------------------------------------------ screen (computer use, live) */
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  min-height: 0;
+}
+.screen__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.screen__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--correct-color);
+  flex: none;
+}
+.screen__url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+.screen__time {
+  color: var(--text-secondary);
+  flex: none;
+}
+.screen__img {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: #fff;
+}

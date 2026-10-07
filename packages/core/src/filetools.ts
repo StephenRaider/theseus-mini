@@ -1,5 +1,6 @@
 import { AlignmentType, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { extractText, getDocumentProxy } from "unpdf";
 import { z } from "zod";
 import { SandboxError, type FileSandbox } from "./files.ts";
@@ -34,9 +35,25 @@ export async function documentText(name: string, bytes: Uint8Array): Promise<str
     });
     return out.join("\n");
   }
-  if (ext === "docx") throw new ToolFailure("validation", `${name} is a Word file; reading Word text isn't supported yet`);
+  if (ext === "docx") return docxText(bytes);
+  if (["doc", "xls", "ppt", "pptx", "zip", "jpg", "jpeg", "png", "gif", "exe"].includes(ext ?? "")) throw new ToolFailure("validation", `${name}: reading .${ext} files isn't supported`);
   return Buffer.from(bytes).toString("utf8");
 }
+
+/** Text of a Word document: paragraphs (and table cells) in order. */
+async function docxText(bytes: Uint8Array): Promise<string> {
+  const zip = await JSZip.loadAsync(bytes);
+  const xml = await zip.file("word/document.xml")?.async("string");
+  if (!xml) throw new ToolFailure("validation", "Not a readable Word document");
+  const decode = (t: string) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+  return xml
+    .split(/<\/w:p>/)
+    .map((p) => decode((p.match(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>/g) ?? []).map((m) => (m === "<w:tab/>" ? "\t" : m.replace(/<[^>]+>/g, ""))).join("")))
+    .filter((l) => l.trim())
+    .join("\n");
+}
+
+const SEARCHABLE = /\.(pdf|xlsx|docx|csv|txt|md|json|tsv)$/i;
 
 function cellText(v: unknown): string {
   if (v == null) return "";
@@ -70,7 +87,7 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
   };
   const read: Tool<{ path: string }> = {
     name: "files.read_text",
-    description: "Read a workspace file as text (PDF, Excel .xlsx, CSV, TXT)",
+    description: "Read a workspace file as text (PDF, Excel .xlsx, Word .docx, CSV, TXT)",
     risk: "read",
     idempotent: true,
     input: z.object({ path: z.string() }),
@@ -109,7 +126,41 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
       return { path: used };
     },
   };
-  return [list, read, save, saveDocx];
+  const textCache = new Map<string, { mtime: number; text: string }>();
+  const search: Tool<{ query: string; folder?: string }> = {
+    name: "files.search",
+    description: "Search the workspace: file names AND the text inside PDFs, Excel, Word, CSV and text files. Returns matching files with a snippet",
+    risk: "read",
+    idempotent: true,
+    input: z.object({ query: z.string().min(1).describe("Words to find (all must appear), e.g. \"Hoysala invoice\""), folder: z.string().optional() }),
+    output: "{ matches: [{ path, modified, where: name|content, snippet }] }",
+    async run({ query, folder }) {
+      const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const entries = (await sandbox.walk(rootId, folder ?? "", 5).catch(sandboxFailure)).filter((e) => e.kind === "file");
+      const matches: { path: string; modified: string; where: "name" | "content"; snippet?: string }[] = [];
+      for (const e of entries) {
+        const modified = new Date(e.mtimeMs).toISOString();
+        if (words.every((w) => e.rel.toLowerCase().includes(w))) {
+          matches.push({ path: e.rel, modified, where: "name" });
+          continue;
+        }
+        if (!SEARCHABLE.test(e.rel) || e.size > 5 * 1024 * 1024) continue;
+        let text = textCache.get(e.rel)?.mtime === e.mtimeMs ? textCache.get(e.rel)!.text : undefined;
+        if (text === undefined) {
+          text = await documentText(e.rel, await sandbox.readBytes(rootId, e.rel)).catch(() => "");
+          textCache.set(e.rel, { mtime: e.mtimeMs, text });
+        }
+        const low = text.toLowerCase();
+        if (!words.every((w) => low.includes(w))) continue;
+        const at = low.indexOf(words[0]!);
+        const snippet = text.slice(Math.max(0, at - 80), at + 160).replace(/\s+/g, " ").trim();
+        matches.push({ path: e.rel, modified, where: "content", snippet });
+        if (matches.length >= 25) break;
+      }
+      return { matches };
+    },
+  };
+  return [list, read, search, save, saveDocx];
 }
 
 /* ------------------------------------------------------------------ Word documents */

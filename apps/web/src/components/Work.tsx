@@ -9,10 +9,12 @@ import { memo, useCallback, useMemo, useState } from "react";
 import { clock, progress, taskTitle } from "../state/selectors.ts";
 import type { AppState } from "../state/store.ts";
 import { Activity } from "./Activity.tsx";
+import { bridge } from "../bridge.ts";
 import { Files } from "./Files.tsx";
+import { Screen } from "./Screen.tsx";
 import { Avatar, Icon, Tag } from "./ui.tsx";
 
-type Tab = "plan" | "files" | "activity";
+type Tab = "plan" | "screen" | "files" | "activity";
 
 export function Work(props: {
   state: AppState;
@@ -38,9 +40,9 @@ export function Work(props: {
     <section className="col col--right">
       <header className="colhead">
         <div className="tabs" role="tablist">
-          {(["plan", "files", "activity"] as Tab[]).map((t) => (
+          {(["plan", ...(bridge()?.agent && employeeId !== THESEUS_ID ? ["screen"] : []), "files", "activity"] as Tab[]).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} className={`tab ${tab === t ? "tab--on" : ""}`} onClick={() => setTab(t)}>
-              {t === "plan" ? (employeeId === THESEUS_ID ? "Overview" : "Plan") : t === "files" ? "Files" : "Activity"}
+              {t === "plan" ? (employeeId === THESEUS_ID ? "Overview" : "Plan") : t === "screen" ? "Screen" : t === "files" ? "Files" : "Activity"}
               {t === "files" && props.freshFiles.size ? <span className="tab__dot" /> : null}
             </button>
           ))}
@@ -55,6 +57,8 @@ export function Work(props: {
           ) : (
             <Empty title="No plan yet" text="When this employee gets a task, its plan appears here as a grid you can steer." />
           )
+        ) : tab === "screen" && employeeId !== THESEUS_ID ? (
+          <Screen employeeId={employeeId} />
         ) : tab === "files" ? (
           <Files fresh={props.freshFiles} />
         ) : (

@@ -36,6 +36,12 @@ const api: TheseusBridge = {
       ipcRenderer.on("agent:status", listener);
       return () => ipcRenderer.removeListener("agent:status", listener);
     },
+    frames: () => call("agent:frames"),
+    onFrame: (cb) => {
+      const listener = (_e: unknown, frame: Parameters<typeof cb>[0]) => cb(frame);
+      ipcRenderer.on("agent:frame", listener);
+      return () => ipcRenderer.removeListener("agent:frame", listener);
+    },
     onReset: (cb) => {
       const listener = () => cb();
       ipcRenderer.on("agent:reset", listener);

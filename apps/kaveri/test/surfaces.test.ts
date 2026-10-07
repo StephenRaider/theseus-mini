@@ -186,3 +186,68 @@ describe("Local workspace", () => {
     expect(existsSync(join(dir, WORKSPACE_FILES.batchDir, "scratch.csv"))).toBe(false);
   });
 });
+
+describe("FinDesk: legacy AP register (web forms only, no API)", () => {
+  const signIn = async () => {
+    const r = await sites.ap.app.inject({ method: "POST", url: "/signin", headers: agent, payload: { next: "/invoices/new" } });
+    expect(r.statusCode).toBe(302);
+    return String(r.headers["set-cookie"]).split(";")[0]!;
+  };
+  const good = { vendorId: "V-103", number: "HSF/2026/0447", invoiceDate: "03/10/2026", dueDate: "02/11/2026", taxable: "362000", gst: "65160", total: "427160", workOrder: "WO-2026-103" };
+  const post = (cookie: string, payload: Record<string, string>) => sites.ap.app.inject({ method: "POST", url: "/invoices", headers: { ...agent, cookie }, payload });
+
+  it("has no API and sends you to sign in first", async () => {
+    expect((await sites.ap.app.inject({ url: "/api/invoices" })).statusCode).toBe(302);
+    const r = await sites.ap.app.inject({ url: "/invoices" });
+    expect(r.headers.location).toBe("/signin?next=%2Finvoices");
+    const cookie = await signIn();
+    const list = await sites.ap.app.inject({ url: "/invoices", headers: { cookie } });
+    expect(list.body).toContain('data-site="ap"');
+    expect(list.body).toContain("HSF/2026/0431");
+    expect(list.body).not.toContain("HSF/2026/0447");
+  });
+
+  it("enforces its legacy formats with messages a person can act on", async () => {
+    const cookie = await signIn();
+    let r = await post(cookie, { ...good, invoiceDate: "2026-10-03" });
+    expect(r.statusCode).toBe(422);
+    expect(r.body).toContain("Invoice date must be a date in DD/MM/YYYY format");
+    expect(r.body).toContain('value="HSF/2026/0447"'); // the form keeps what was typed
+    r = await post(cookie, { ...good, total: "4,27,160" });
+    expect(r.body).toContain("digits only, no commas");
+    r = await post(cookie, { ...good, total: "427000" });
+    expect(r.body).toContain("doesn&#39;t equal taxable value + GST");
+    r = await post(cookie, { ...good, number: "HSF/2026/0431" });
+    expect(r.statusCode).toBe(409);
+    expect(r.body).toContain("already booked as AP-2026-0098");
+    r = await post(cookie, { ...good, vendorId: "V-109" });
+    expect(r.body).toContain("is inactive");
+    expect(kaveri.state.apInvoices.some((i) => i.number === "HSF/2026/0447")).toBe(false);
+  });
+
+  it("saves a draft, then posts it; the register records who did it", async () => {
+    const cookie = await signIn();
+    const r = await post(cookie, good);
+    expect(r.statusCode).toBe(302);
+    expect(r.headers.location).toMatch(/^\/invoices\/AP-2026-0100\?flash=Saved/);
+    const inv = kaveri.getApInvoice("AP-2026-0100");
+    expect(inv).toMatchObject({ vendorId: "V-103", invoiceDate: "2026-10-03", dueDate: "2026-11-02", total: 427160, status: "draft", enteredBy: "agent:emp_2" });
+    const page = await sites.ap.app.inject({ url: "/invoices/AP-2026-0100", headers: { cookie } });
+    expect(page.body).toContain("Post to ledger");
+    await sites.ap.app.inject({ method: "POST", url: "/invoices/AP-2026-0100/post", headers: { ...agent, cookie } });
+    expect(kaveri.getApInvoice("AP-2026-0100")).toMatchObject({ status: "posted", postedBy: "agent:emp_2" });
+  });
+
+  it("can expire a session mid-task (fault), and a 503 on save is an error page", async () => {
+    const cookie = await signIn();
+    kaveri.setFaults({ failNext: { "ap.session_expired": 1 } });
+    const r = await sites.ap.app.inject({ url: "/invoices/new", headers: { cookie } });
+    expect(r.headers.location).toBe("/signin?next=%2Finvoices%2Fnew&expired=1");
+    const again = await signIn();
+    kaveri.setFaults({ failNext: { "findesk.save_invoice": 1 } });
+    const fail = await post(again, good);
+    expect(fail.statusCode).toBe(503);
+    expect(fail.body).toContain("TEMPORARILY_UNAVAILABLE");
+    expect((await post(again, good)).statusCode).toBe(302);
+  });
+});

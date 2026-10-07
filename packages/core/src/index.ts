@@ -7,6 +7,7 @@
 export * from "./rolepack.ts";
 export * from "./files.ts";
 export * from "./filetools.ts";
+export * from "./browsertools.ts";
 export * from "./log.ts";
 export * from "./model.ts";
 export * from "./gemini.ts";

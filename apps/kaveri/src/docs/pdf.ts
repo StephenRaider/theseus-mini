@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
-import { BIDDERS, COMPANY } from "../seed/scenario.ts";
+import { BIDDERS, COMPANY, VENDORS } from "../seed/scenario.ts";
 
 /**
  * Generates the scenario's documents as real, text-based PDFs (so the agent
@@ -133,6 +133,31 @@ const emdGuarantee = (b: Bidder, g: { number: string; bank: string; amount: numb
     { text: "Authorised Officer (signed and sealed)", size: 10 },
   ]);
 
+/** A GST tax invoice (CGST + SGST, intra-state), the kind AP books every day. */
+const taxInvoice = (inv: { number: string; date: string; due: string; wo: string; lines: [string, number][]; taxable: number; gst: number }) => {
+  const rs = (n: number) => `Rs. ${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const half = inv.gst / 2;
+  return render("TAX INVOICE", "Hoysala Steel Fabricators Private Limited · Plot 21, KIADB, Dobbaspet, Tumakuru, Karnataka 562111", [
+    kv("GSTIN", VENDORS.find((v) => v.id === "V-103")!.gstin!),
+    kv("Invoice No.", inv.number),
+    kv("Invoice Date", inv.date),
+    kv("Due Date", inv.due),
+    kv("Bill to", `${COMPANY.name}, ${COMPANY.address.split(",").slice(0, 2).join(",")}`),
+    kv("Buyer GSTIN", COMPANY.gstin),
+    kv("Work order", inv.wo),
+    { text: "", gap: 8 },
+    { text: "Description                                                    Amount", bold: true },
+    ...inv.lines.map(([d, a]) => ({ text: `${d.padEnd(60, " ")} ${rs(a)}` })),
+    { text: "", gap: 8 },
+    kv("Taxable value", rs(inv.taxable)),
+    kv("CGST @ 9%", rs(half)),
+    kv("SGST @ 9%", rs(half)),
+    { text: `Invoice total:  ${rs(inv.taxable + inv.gst)}`, bold: true },
+    { text: "Payment terms: 30 days from invoice date. Please quote the invoice number with payment.", size: 9 },
+    { text: "For Hoysala Steel Fabricators Pvt Ltd  (signed)  Authorised Signatory", size: 10 },
+  ]);
+};
+
 function constitution(pan: string): string {
   return ({ P: "Proprietorship", F: "Partnership / LLP", C: "Private Limited Company" } as Record<string, string>)[pan[3]!] ?? "Other";
 }
@@ -160,6 +185,18 @@ const GENERATORS: Record<string, () => Promise<Uint8Array>> = {
   "emdbg:C": () => emdGuarantee(BIDDERS.C, { number: "PBG/SBI/2026/40917", bank: "State Bank of India, Mysuru", amount: 980_000, until: "30/09/2027" }),
   "bankchange:SG": sgChangeLetter,
   "bankchange:ARKA": arkaChangeLetter,
+  "invoice:HSF-0431": () =>
+    taxInvoice({ number: "HSF/2026/0431", date: "23/09/2026", due: "23/10/2026", wo: "WO-2026-103", lines: [["Structural steel fabrication, culvert C-7 (RA-3)", 349_576]], taxable: 349_576, gst: 62_924 }),
+  "invoice:HSF-0447": () =>
+    taxInvoice({
+      number: "HSF/2026/0447",
+      date: "03/10/2026",
+      due: "02/11/2026",
+      wo: "WO-2026-103",
+      lines: [["Structural steel fabrication, culvert C-7 (RA-4)", 298_000], ["Hot-dip galvanising, 4.2 t", 64_000]],
+      taxable: 362_000,
+      gst: 65_160,
+    }),
 };
 
 const cache = new Map<string, Promise<Uint8Array>>();

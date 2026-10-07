@@ -192,6 +192,30 @@ export interface PaymentFile {
   note?: string;
 }
 
+/**
+ * An invoice booked in FinDesk, the legacy AP invoice register. FinDesk has no
+ * API: people (and agents) enter invoices through its web forms.
+ */
+export interface ApInvoice {
+  doc: string; // AP-2026-0101
+  vendorId: string;
+  vendorName: string;
+  number: string;
+  /** ISO dates (the form takes DD/MM/YYYY). */
+  invoiceDate: string;
+  dueDate: string;
+  taxable: number;
+  gst: number;
+  total: number;
+  workOrder?: string;
+  remarks?: string;
+  status: "draft" | "posted";
+  enteredBy: string;
+  enteredAt: string;
+  postedBy?: string;
+  postedAt?: string;
+}
+
 export interface KaveriState {
   /** Scenario "today" (fixed so runs are reproducible). */
   today: string;
@@ -208,6 +232,8 @@ export interface KaveriState {
   mail: Email[];
   udyamRegistry: UdyamRecord[];
   paymentFiles: PaymentFile[];
+  /** FinDesk (legacy AP register, web forms only). */
+  apInvoices: ApInvoice[];
   /** Human tasks / approvals recorded by the company side (call-backs etc.). */
   auditLog: { at: string; actor: string; action: string; detail: string }[];
 }

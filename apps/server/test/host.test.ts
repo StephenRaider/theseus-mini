@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { THESEUS_ID, type TheseusEvent } from "@theseus/protocol";
 import { describe, expect, it } from "vitest";
-import { AgentHost, managerIntent } from "../src/host.ts";
+import { AgentHost, managerIntent, type BrowserFrame } from "../src/host.ts";
 
 /** The desktop app's agent host, driven exactly as the app drives it (commands in, events out). */
 describe("agent host (what the desktop app talks to)", () => {
@@ -34,6 +34,23 @@ describe("agent host (what the desktop app talks to)", () => {
     // Events are a gapless sequence (the UI relies on seq to merge snapshot + stream).
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
   });
+
+  it("computer use: the app sees the employee's browser after every action", async () => {
+    const frames: BrowserFrame[] = [];
+    const host = await AgentHost.create({ mode: "demo", workspaceDir: await mkdtemp(join(tmpdir(), "theseus-host-")), onEvent: () => {}, onFrame: (f) => frames.push(f), stepDelayMs: 0 });
+    try {
+      // The first suggestion in the app is the brief's example: find an invoice, enter it in FinDesk.
+      expect(host.info.suggestions[0]).toMatch(/latest invoice .* FinDesk/);
+      await host.command({ type: "send_message", threadId: THESEUS_ID, text: host.info.suggestions[0]!, attachments: [] });
+      for (let i = 0; i < 1000 && !host.kernel.log.ofType("task.status_changed").some((e) => e.payload.status === "done"); i++) await new Promise((r) => setTimeout(r, 10));
+      expect(frames.length).toBeGreaterThan(3);
+      expect(frames[0]).toMatchObject({ employeeId: "emp_1", title: "Sign in · Kaveri FinDesk 4.2" });
+      expect(frames.at(-1)!.title).toMatch(/^AP-2026-0100/);
+      expect(Buffer.from(frames.at(-1)!.jpeg, "base64").subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8])); // a real JPEG
+    } finally {
+      await host.close();
+    }
+  }, 60_000);
 
   it("Theseus handles team requests itself: hire, who's doing what, assign to a named employee", async () => {
     const events: TheseusEvent[] = [];
