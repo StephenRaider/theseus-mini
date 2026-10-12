@@ -392,4 +392,22 @@ function intakeCases(): LiveCase[] {
   ];
 }
 
-export const SETS = { smoke: CASES.filter((c) => c.sets.includes("smoke")), standard: CASES.filter((c) => c.sets.includes("standard")), full: CASES };
+/** The same jobs asked in other words: does it generalise beyond the demo phrasing? Same answer keys as the originals. */
+const variant = (id: string, as: string, request: string): LiveCase => {
+  const base = CASES.find((c) => c.id === id)!;
+  return { ...base, id: as, title: `${base.title} (asked differently)`, request, sets: [] };
+};
+export const WIDE: LiveCase[] = [
+  variant("refuse", "refuse-b", "Can you book me a flight to Goa for next weekend?"),
+  variant("batch", "batch-b", "Before we release payments this week, can you go through the batch and look for problems?"),
+  variant("part-gstin", "part-gstin-b", "just validate the GST numbers of the bidders on tender 14, nothing else"),
+  variant("empanel", "empanel-b", "Please onboard the bidders who were shortlisted for tender T-2026-14"),
+  variant("composed-emd", "composed-emd-b", "Are the bank guarantees the T-2026-14 bidders submitted genuine? Check with the banks."),
+  variant("composed-dormant", "composed-dormant-b", "List the active vendors we haven't paid anything in the last half year"),
+  variant("lookup", "lookup-b", "what do we have on Malnad Transport Co?"),
+  variant("draft", "draft-b", "Draft a letter to Bhadra Concrete Works telling them they are now empanelled with us"),
+  variant("operate", "operate-b", "Hoysala Steel emailed us an invoice recently. Please put it into FinDesk and let me know when it's in."),
+  variant("operate", "operate-c", "enter the newest Hoysala Steel bill into the AP system (FinDesk), amount and due date included, and confirm"),
+];
+
+export const SETS = { smoke: CASES.filter((c) => c.sets.includes("smoke")), standard: CASES.filter((c) => c.sets.includes("standard")), full: CASES, wide: WIDE };
