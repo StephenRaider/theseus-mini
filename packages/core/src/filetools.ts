@@ -14,6 +14,29 @@ import { ToolFailure, type Tool } from "./gateway.ts";
  * overwrites an existing file.
  */
 
+/** A list the model typed as text: a JSON array, or one entry per line (or separated by |). */
+const asList = (v: unknown): unknown => {
+  if (typeof v !== "string") return v;
+  const t = v.trim();
+  if (t.startsWith("[")) {
+    try {
+      return JSON.parse(t);
+    } catch {
+      /* fall through to lines */
+    }
+  }
+  return t.split(/\r?\n|\|/).map((x) => x.trim()).filter(Boolean);
+};
+const asMoves = (v: unknown): unknown => {
+  const l = asList(v);
+  if (!Array.isArray(l)) return l;
+  return l.map((x) => {
+    if (typeof x !== "string") return x;
+    const [from, to] = x.split(/\s*(?:=>|->|→)\s*/);
+    return { from: from?.trim() ?? "", to: to?.trim() ?? "" };
+  });
+};
+
 const IMAGE_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
 const IMAGE_INSTRUCTION =
   "This is a picture of a document (a scan or phone photo). Transcribe ALL the text on it exactly as printed, line by line, keeping labels and values together as 'Label: value'. Do not interpret or summarise. Put [illegible] where you cannot read something. If it is not a document, describe it in one line.";
@@ -145,27 +168,29 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
       return { path: used };
     },
   };
-  const saveXlsx: Tool<{ path: string; sheets: { name: string; rows: string[][] }[] }> = {
+  const saveXlsx: Tool<{ path: string; sheet?: string | undefined; rows: string[][] }> = {
     name: "files.save_xlsx",
-    description: "Save a NEW Excel workbook (.xlsx) from sheets of rows (first row = header). Never overwrites",
+    description: "Save a NEW Excel workbook (.xlsx). Args: path; sheet (optional name); rows = one table row per line, cells separated by ' | ', first line = column headings. Never overwrites",
     risk: "write",
     idempotent: false,
     input: z.object({
       path: z.string().describe('Workspace path, e.g. "Onboarding/Document Checklist.xlsx"'),
-      sheets: z.array(z.object({ name: z.string(), rows: z.array(z.array(z.string())) })).min(1).max(6),
+      sheet: z.string().optional(),
+      rows: z.preprocess(
+        (v) => (typeof v === "string" ? v.split(/\r?\n/).filter((l) => l.trim()).map((l) => l.split("|").map((c) => c.trim())) : v),
+        z.array(z.array(z.string())).min(1).max(500),
+      ),
     }),
     output: "{ path }",
-    async explain({ path, sheets }) {
-      return { summary: `Create ${path} (${sheets.map((s) => `${s.name}: ${Math.max(0, s.rows.length - 1)} rows`).join(", ")})` };
+    async explain({ path, rows }) {
+      return { summary: `Create ${path} (${Math.max(0, rows.length - 1)} rows)` };
     },
-    async run({ path, sheets }, ctx) {
+    async run({ path, sheet, rows }, ctx) {
       const wb = new ExcelJS.Workbook();
-      for (const sh of sheets) {
-        const ws = wb.addWorksheet(sh.name.slice(0, 31));
-        sh.rows.forEach((r) => ws.addRow(r));
-        ws.getRow(1).font = { bold: true };
-        ws.columns.forEach((c) => (c.width = 28));
-      }
+      const ws = wb.addWorksheet((sheet ?? "Sheet1").slice(0, 31));
+      rows.forEach((r) => ws.addRow(r));
+      ws.getRow(1).font = { bold: true };
+      ws.columns.forEach((c) => (c.width = 30));
       const rel = path.toLowerCase().endsWith(".xlsx") ? path : `${path}.xlsx`;
       const used = await sandbox.writeNew(rootId, rel, new Uint8Array(await wb.xlsx.writeBuffer())).catch(sandboxFailure);
       ctx.evidence({ kind: "document", summary: `Saved ${used}`, source: `file:${used}`, ref: used });
@@ -205,6 +230,52 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
     },
   };
   const textCache = new Map<string, { mtime: number; text: string }>();
+  const readMany: Tool<{ paths: string[] }> = {
+    name: "files.read_many",
+    description: "Read up to 8 workspace files in one go (same formats as files.read_text, pictures included). Args: paths = the file paths, one per line. Use it to go through a pile of documents quickly",
+    risk: "read",
+    idempotent: true,
+    input: z.object({ paths: z.preprocess(asList, z.array(z.string()).min(1).max(8)) }),
+    output: "{ files: [{ path, text | error }] }",
+    async run({ paths }, ctx) {
+      const files = [];
+      for (const path of paths) {
+        try {
+          const r = (await read.run({ path }, ctx)) as { text: string };
+          files.push({ path, text: r.text.length > 4000 ? `${r.text.slice(0, 4000)}\n…(truncated)` : r.text });
+        } catch (e) {
+          files.push({ path, error: (e as Error).message });
+        }
+      }
+      return { files };
+    },
+  };
+  const moveMany: Tool<{ moves: { from: string; to: string }[] }> = {
+    name: "files.move_many",
+    description: "Move or rename up to 15 files in one go (never overwrites; each can be undone). Args: moves = one move per line, written 'old path => new path'. Use it once you know where every file belongs",
+    risk: "write",
+    idempotent: false,
+    input: z.object({ moves: z.preprocess(asMoves, z.array(z.object({ from: z.string().min(1), to: z.string().min(1) })).min(1).max(15)) }),
+    output: "{ moved: [{ from, to }], failed: [{ from, error }] }",
+    async explain({ moves }) {
+      return { summary: moves.map((m) => `Move ${m.from} → ${m.to}`).join("\n") };
+    },
+    async run({ moves }, ctx) {
+      const moved: { from: string; to: string }[] = [];
+      const failed: { from: string; error: string }[] = [];
+      for (const m of moves) {
+        try {
+          const used = await sandbox.move(rootId, m.from, m.to);
+          ctx.evidence({ kind: "document", summary: `Filed ${m.from} as ${used}`, source: `file:${used}`, ref: used });
+          ctx.effect({ summary: `Moved ${m.from} → ${used}`, undo: { tool: "files.move", input: { from: used, to: m.from } } });
+          moved.push({ from: m.from, to: used });
+        } catch (e) {
+          failed.push({ from: m.from, error: (e as Error).message });
+        }
+      }
+      return { moved, failed };
+    },
+  };
   const search: Tool<{ query: string; folder?: string }> = {
     name: "files.search",
     description: "Search the workspace: file names AND the text inside PDFs, Excel, Word, CSV and text files. Returns matching files with a snippet",
@@ -238,7 +309,7 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
       return { matches };
     },
   };
-  return [list, read, search, save, saveDocx, saveXlsx, move, trash];
+  return [list, read, readMany, search, save, saveDocx, saveXlsx, move, moveMany, trash];
 }
 
 /* ------------------------------------------------------------------ Word documents */

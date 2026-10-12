@@ -143,6 +143,9 @@ export const POLICY_SECTIONS: Array<{ title: string; rules: string[] }> = [
       "2.5 Check the debarment register. Debarred parties must not be registered.",
       "2.6 Create the vendor as Pending. Activation requires approval by a different person (maker-checker). Record the case in the Vendor Register.",
       "2.7 If a check fails, park the case with the reason, inform the requester and ask the bidder for corrected documents. Escalate conflicts of interest to the Finance Head.",
+      "2.8 Filing documents received from vendors: file each under Onboarding/<Vendor legal name>/ and name it '<Document type> - <Vendor legal name>' keeping the original extension. Document types are exactly: GST Certificate, PAN Card, Bank Proof (cancelled cheque or bank letter), Udyam Certificate, Proprietor Declaration, Bid Form.",
+      "2.9 A second copy of a document already filed goes to Onboarding/_Review/Duplicates, a file that is not a vendor document to Onboarding/_Review/Not vendor documents. Never delete anything. Record what each vendor has and still owes in Onboarding/Document Checklist.xlsx (one row per vendor and required document: Received / Missing, plus an Issues column) and draft a short request to each vendor for what is missing.",
+      "2.10 A bank proof in the name of an individual is acceptable for a proprietorship only with a signed Proprietor Declaration. A PAN card whose number differs from the PAN inside the GSTIN is an issue to flag, not to fix.",
     ],
   },
   {

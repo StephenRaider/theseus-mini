@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Kernel } from "@theseus/core";
 import type { TheseusEvent } from "@theseus/protocol";
+import { checkIntake, originalHashes, snapshot, type Snapshot } from "./intake-check.ts";
 import type { World } from "@theseus/server/world";
 
 /**
@@ -26,6 +27,8 @@ export interface CaseCtx {
   /** The task the request created. */
   task: ReturnType<Kernel["runs"]["get"]> extends infer R ? NonNullable<R> : never;
   events: readonly TheseusEvent[];
+  /** Scratch space shared by `before`, `after` and `check` (snapshots of folders, etc.). */
+  notes: Record<string, any>;
 }
 
 export interface LiveCase {
@@ -52,6 +55,12 @@ export interface LiveCase {
   nudge?: { text: string; when: (e: TheseusEvent) => boolean };
   /** Slow every step down so the nudge lands mid-work. */
   stepDelayMs?: number;
+  /** Rehearse first: the employee only previews its changes; `after` decides what happens next. */
+  rehearse?: boolean;
+  /** Runs before the request is sent (e.g. remember what the folders looked like). */
+  before?(c: { world: World; notes: Record<string, any> }): Promise<void>;
+  /** Runs once the task is over, before `check` (e.g. apply a rehearsal, undo, snapshot folders). */
+  after?(c: CaseCtx): Promise<void>;
   check(c: CaseCtx): Check[];
 }
 
@@ -298,6 +307,88 @@ export const CASES: LiveCase[] = [
       ok("The employee reported that your instruction stopped it", /hold everything to Hoysala|your instruction|held/i.test(c.lastSaid)),
     ],
   },
+  ...intakeCases(),
 ];
+
+const SORT_REQUEST = "The Incoming folder is a mess: scans, phone photos, PDFs and Word files that bidders sent, all under random names. Sort it out following our vendor policy, tell me what is missing for each vendor, and draft a request to each vendor for what they still owe.";
+
+function intakeCases(): LiveCase[] {
+  const prepare: LiveCase["before"] = async ({ world, notes }) => void (notes.orig = await originalHashes(world.workspaceDir));
+  const grab = async (c: CaseCtx) => void (c.notes.snap = await snapshot(c.world.workspaceDir));
+  const sorted = (c: CaseCtx): Check[] => checkIntake(c.notes.snap as Snapshot, c.notes.orig, c.said.join("\n")).map((x) => ok(x.name, x.ok, x.detail));
+  return [
+    {
+      id: "intake",
+      title: "Messy intake: sorts mixed-format documents, renames them, files them, finds what is missing",
+      request: SORT_REQUEST,
+      sets: ["standard", "full"],
+      estimateUsd: 0.6,
+      before: prepare,
+      after: grab,
+      check: (c) => [done(c), ...sorted(c), verifierPassed(c)],
+    },
+    {
+      id: "intake-wide",
+      title: "Messy intake, asked in other words (generalisation)",
+      request: "my father's office dumped all the vendor paperwork in Incoming. can you file it properly in Onboarding, and list who still hasn't sent what? write to them too",
+      sets: ["full"],
+      estimateUsd: 0.6,
+      before: prepare,
+      after: grab,
+      check: (c) => [done(c), ...sorted(c)],
+    },
+    {
+      id: "intake-rehearse",
+      title: "Messy intake, rehearsed first: nothing changes until you apply it",
+      request: SORT_REQUEST,
+      rehearse: true,
+      sets: ["full"],
+      estimateUsd: 0.6,
+      before: prepare,
+      after: async (c) => {
+        c.notes.during = await snapshot(c.world.workspaceDir);
+        c.notes.previews = c.events.filter((e) => e.type === "effect.previewed").length;
+        await c.kernel.command({ type: "resolve_rehearsal", taskId: c.task.task.id, decision: "apply" });
+        await c.kernel.settled();
+        await grab(c);
+      },
+      check: (c) => {
+        const during = c.notes.during as Snapshot;
+        const untouched = [...(c.notes.orig as Map<string, string>)].every(([p]) => during.paths.includes(p)) && !during.paths.some((p) => p.startsWith("Onboarding/"));
+        return [
+          ok("While rehearsing, nothing was moved or created", untouched),
+          ok("It showed what it would do (at least 10 changes)", (c.notes.previews as number) >= 10, `previews: ${c.notes.previews}`),
+          ...sorted(c),
+        ];
+      },
+    },
+    {
+      id: "intake-undo",
+      title: "Messy intake, then Undo everything: the pile comes back exactly",
+      request: SORT_REQUEST,
+      sets: ["full"],
+      estimateUsd: 0.6,
+      before: prepare,
+      after: async (c) => {
+        c.notes.sortedSnap = await snapshot(c.world.workspaceDir);
+        await c.kernel.command({ type: "undo_task", taskId: c.task.task.id });
+        await c.kernel.settled();
+        await grab(c);
+      },
+      check: (c) => {
+        const after = c.notes.snap as Snapshot;
+        const orig = c.notes.orig as Map<string, string>;
+        const back = [...orig].filter(([p, h]) => !(after.byHash.get(h) ?? []).includes(p)).map(([p]) => p);
+        const failing = checkIntake(c.notes.sortedSnap as Snapshot, orig, c.said.join("\n")).filter((x) => !x.ok).length;
+        return [
+          done(c),
+          ok("Before the undo it had really sorted the files (at most 2 checks failing)", failing <= 2, `${failing} failing`),
+          ok("After Undo every file is back at its original path with its original content", back.length === 0, back.join(", ")),
+          ok("After Undo nothing it created is left in Onboarding, Drafts or Outbox", !after.paths.some((p) => /^(Onboarding|Drafts|Outbox)\//.test(p))),
+        ];
+      },
+    },
+  ];
+}
 
 export const SETS = { smoke: CASES.filter((c) => c.sets.includes("smoke")), standard: CASES.filter((c) => c.sets.includes("standard")), full: CASES };

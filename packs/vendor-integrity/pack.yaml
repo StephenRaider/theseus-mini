@@ -26,6 +26,8 @@ tools:
   - { name: files.save_docx, risk: write, description: "Save a new Word document in the workspace (never overwrites)" }
   - { name: files.save_xlsx, risk: write, description: "Save a new Excel workbook in the workspace (never overwrites)" }
   - { name: files.move, risk: write, description: "Move or rename one workspace file (never overwrites; undoable)" }
+  - { name: files.read_many, risk: read, description: "Read up to 8 workspace files at once (pictures included)" }
+  - { name: files.move_many, risk: write, description: "Move or rename up to 15 files at once (undoable)" }
   - { name: files.trash, risk: write, description: "Put a file the employee created into .trash (used by Undo)" }
   - { name: eproc.list_tenders, risk: read, description: "List tenders on the e-procurement portal" }
   - { name: eproc.get_tender, risk: read, description: "Read a tender with its bidders, bid amounts and EMD guarantees" }
@@ -78,6 +80,7 @@ persona:
   steerExample: hold Malnad
   examples:
     - "Find the latest invoice from Hoysala Steel, extract the amount and due date, enter it into FinDesk and tell me once it's done"
+    - "The Incoming folder is a mess of scans, PDFs and Word files from bidders. Sort it out and tell me what is missing"
     - "Run the integrity check on this week's payment batch"
     - "Empanel the three bidders who qualified on T-2026-14"
     - "Only check the GSTINs of the T-14 bidders"

@@ -72,13 +72,16 @@ export async function runCase(c: LiveCase, o: RunOptions): Promise<CaseResult> {
         }
       });
     }
-    await kernel.send(employee.id, c.request);
+    const notes: Record<string, any> = {};
+    await c.before?.({ world, notes });
+    await kernel.command({ type: "send_message", threadId: employee.id, text: c.request, attachments: [], ...(c.rehearse ? { rehearse: true } : {}) });
     await untilOver(kernel, (o.timeoutSec ?? 300) * 1000, (o.idleGraceSec ?? 20) * 1000);
     await kernel.settled();
 
     const run = [...kernel.runs.values()].at(-1)!;
     const said = kernel.log.ofType("message.posted").filter((m) => m.payload.from.startsWith("employee:")).map((m) => m.payload.text);
-    const ctx: CaseCtx = { kernel, employeeId: employee.id, world, said, lastSaid: said.at(-1) ?? "", task: run, events: kernel.log.events };
+    const ctx: CaseCtx = { kernel, employeeId: employee.id, world, said, lastSaid: said.at(-1) ?? "", task: run, events: kernel.log.events, notes };
+    await c.after?.(ctx);
     result.checks = c.check(ctx);
     result.pass = result.checks.every((x) => x.ok);
     result.tier = run.task.tier;

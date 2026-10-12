@@ -20,6 +20,8 @@
     "@theseus/kaveri": "workspace:*",
     "@theseus/protocol": "workspace:*",
     "@theseus/server": "workspace:*",
-    "zod": "^4.1.0"
+    "zod": "^4.1.0",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.1"
   }
 }
