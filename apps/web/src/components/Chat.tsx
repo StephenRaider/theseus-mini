@@ -8,6 +8,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { attachmentRef, bridge, mimeOf } from "../bridge.ts";
 import { clock, currentTask, dayLabel, progress, sameDay, taskTitle } from "../state/selectors.ts";
 import type { AppState, OrientView, QuestionView } from "../state/store.ts";
+import { BatchApprovals } from "./BatchApprovals.tsx";
+import { PreviewPanel } from "./Changes.tsx";
 import { Avatar, FileCard, Icon, Tag, alertish } from "./ui.tsx";
 
 type Entry =
@@ -28,6 +30,7 @@ export function Chat(props: {
   const { state, now, threadId, send } = props;
   const emp = state.employees[threadId];
   const [pending, setPending] = useState<Attachment[]>([]);
+  const [rehearse, setRehearse] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
@@ -80,7 +83,7 @@ export function Chat(props: {
   const doSend = (text: string) => {
     const t = text.trim();
     if (!t && pending.length === 0) return;
-    send({ type: "send_message", threadId, text: t || "(attachment)", attachments: pending });
+    send({ type: "send_message", threadId, text: t || "(attachment)", attachments: pending, rehearse });
     props.setDraft("");
     setPending([]);
     atBottom.current = true;
@@ -194,6 +197,13 @@ export function Chat(props: {
         </div>
       </div>
 
+      {(() => {
+        const ids = state.tasksByEmployee[threadId] ?? [];
+        const t = ids.map((id) => state.tasks[id]!).filter((x) => x.rehearsal === "preview").pop();
+        return t ? <PreviewPanel state={state} task={t} send={send} /> : null;
+      })()}
+      <BatchApprovals state={state} employeeId={threadId} send={send} />
+
       <footer className="composer">
         {props.suggestions.length ? (
           <div className="suggestions">
@@ -242,6 +252,12 @@ export function Chat(props: {
               }
             }}
           />
+          {threadId !== THESEUS_ID ? (
+            <label className="rehearse" title="Show what would change first. Nothing is touched until you press Apply.">
+              <input type="checkbox" checked={rehearse} onChange={(e) => setRehearse(e.target.checked)} />
+              <span>Rehearse first</span>
+            </label>
+          ) : null}
           <button className="sendbtn" title="Send" onClick={() => doSend(props.draft)} disabled={!props.draft.trim() && !pending.length}>
             <Icon name="send" />
           </button>

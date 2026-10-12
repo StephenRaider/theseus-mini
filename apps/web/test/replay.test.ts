@@ -86,7 +86,7 @@ describe("replay engine", () => {
     const eng = new ReplayEngine(kaveriDemo());
     eng.kickoff();
     eng.advance(15_000);
-    eng.send({ type: "send_message", threadId: E2, text: "Hold everything to Shree Ganesh, it's under dispute.", attachments: [] });
+    eng.send({ type: "send_message", threadId: E2, text: "Hold everything to Shree Ganesh, it's under dispute.", attachments: [], rehearse: false });
     eng.advance(5_000);
     const plan = eng.state.plans[TASK_BATCH]!;
     expect(plan.items.find((i) => i.id === "PL-03")!.held).toBe(true);
@@ -137,7 +137,7 @@ describe("nudge matching", () => {
     const eng = new ReplayEngine(kaveriDemo());
     eng.kickoff();
     eng.advance(15_000);
-    eng.send({ type: "send_message", threadId: E1, text: "Please skip bidder B for now", attachments: [] });
+    eng.send({ type: "send_message", threadId: E1, text: "Please skip bidder B for now", attachments: [], rehearse: false });
     eng.advance(5_000);
     const plan = eng.state.plans[TASK_EMP]!;
     expect(plan.items.find((i) => i.id === "B")!.skipReason).toBeDefined();

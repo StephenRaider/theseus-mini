@@ -58,7 +58,7 @@ describe("live engine (UI ↔ real employees)", () => {
   it("a request to Theseus shows up as delegated work, with approvals and questions in the badges", async () => {
     const { engine, host, flushed } = await wire();
     await flushed();
-    engine.send({ type: "send_message", threadId: THESEUS_ID, text: "Empanel the three bidders who qualified on T-2026-14", attachments: [] });
+    engine.send({ type: "send_message", threadId: THESEUS_ID, text: "Empanel the three bidders who qualified on T-2026-14", attachments: [], rehearse: false });
     await new Promise((r) => setTimeout(r, 50));
     await host.kernel.settled();
     await flushed();
@@ -84,7 +84,7 @@ describe("live engine (UI ↔ real employees)", () => {
     engine.dispose();
     engine.start();
     await flushed();
-    engine.send({ type: "send_message", threadId: THESEUS_ID, text: "Run the integrity check on this week's payment batch", attachments: [] });
+    engine.send({ type: "send_message", threadId: THESEUS_ID, text: "Run the integrity check on this week's payment batch", attachments: [], rehearse: false });
     await new Promise((r) => setTimeout(r, 50));
     await host.kernel.settled();
     await flushed();

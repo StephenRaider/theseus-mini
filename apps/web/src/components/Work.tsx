@@ -10,11 +10,14 @@ import { clock, progress, taskTitle } from "../state/selectors.ts";
 import type { AppState } from "../state/store.ts";
 import { Activity } from "./Activity.tsx";
 import { bridge } from "../bridge.ts";
+import { Changes } from "./Changes.tsx";
 import { Files } from "./Files.tsx";
+import { Memory } from "./Memory.tsx";
+import { Working } from "./Working.tsx";
 import { Screen } from "./Screen.tsx";
 import { Avatar, Icon, Tag } from "./ui.tsx";
 
-type Tab = "plan" | "screen" | "files" | "activity";
+type Tab = "plan" | "screen" | "working" | "changes" | "memory" | "files" | "activity";
 
 export function Work(props: {
   state: AppState;
@@ -40,9 +43,9 @@ export function Work(props: {
     <section className="col col--right">
       <header className="colhead">
         <div className="tabs" role="tablist">
-          {(["plan", ...(bridge()?.agent && employeeId !== THESEUS_ID ? ["screen"] : []), "files", "activity"] as Tab[]).map((t) => (
+          {(["plan", ...(bridge()?.agent && employeeId !== THESEUS_ID ? ["screen"] : []), ...(employeeId !== THESEUS_ID ? ["working", "changes", "memory"] : []), "files", "activity"] as Tab[]).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} className={`tab ${tab === t ? "tab--on" : ""}`} onClick={() => setTab(t)}>
-              {t === "plan" ? (employeeId === THESEUS_ID ? "Overview" : "Plan") : t === "screen" ? "Screen" : t === "files" ? "Files" : "Activity"}
+              {t === "plan" ? (employeeId === THESEUS_ID ? "Overview" : "Plan") : t === "screen" ? "Screen" : t === "working" ? "Working" : t === "changes" ? "Changes" : t === "memory" ? "Memory" : t === "files" ? "Files" : "Activity"}
               {t === "files" && props.freshFiles.size ? <span className="tab__dot" /> : null}
             </button>
           ))}
@@ -59,6 +62,12 @@ export function Work(props: {
           )
         ) : tab === "screen" && employeeId !== THESEUS_ID ? (
           <Screen employeeId={employeeId} />
+        ) : tab === "working" && employeeId !== THESEUS_ID ? (
+          task ? <Working state={state} task={task} /> : <Empty title="No task yet" text="When this employee has a task, the sources behind its answer appear here." />
+        ) : tab === "changes" && employeeId !== THESEUS_ID ? (
+          task ? <Changes state={state} task={task} send={props.send} /> : <Empty title="No task yet" text="Changes this employee makes appear here, with Undo." />
+        ) : tab === "memory" && employeeId !== THESEUS_ID ? (
+          <Memory state={state} employeeId={employeeId} send={props.send} />
         ) : tab === "files" ? (
           <Files fresh={props.freshFiles} />
         ) : (
