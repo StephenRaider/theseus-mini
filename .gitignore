@@ -54,3 +54,4 @@ workspace/
 
 # Subagent worktrees (local only)
 .claude/worktrees/
+apps/desktop/release/

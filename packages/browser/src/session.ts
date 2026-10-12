@@ -98,7 +98,7 @@ export class BrowserPool {
       s = (async () => {
         const browser = await this.launch().catch((e: Error) => {
           this.browser = undefined;
-          throw new BrowserError("crashed", `Couldn't start the browser: ${e.message.split("\n")[0]}. Install it once with: pnpm exec playwright-core install chromium`);
+          throw new BrowserError("crashed", `Couldn't start the browser: ${e.message.split("\n")[0]}. ${process.env.THESEUS_BROWSER_HINT ?? "Install it once with: pnpm exec playwright-core install chromium"}`);
         });
         const context = await browser.newContext({ extraHTTPHeaders: headers, acceptDownloads: true, viewport: { width: 1280, height: 860 } });
         const allowed = new Set(this.opts.allowOrigins.map((o) => new URL(o).origin));

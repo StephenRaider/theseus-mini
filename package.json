@@ -21,7 +21,9 @@
     "browser:install": "pnpm --filter @theseus/browser exec playwright-core install chromium",
     "live:ping": "pnpm --filter @theseus/evals live:ping",
     "live:check": "pnpm --filter @theseus/evals live:check",
-    "live:why": "pnpm --filter @theseus/evals live:why"
+    "live:why": "pnpm --filter @theseus/evals live:why",
+    "dist:win": "pnpm --filter @theseus/desktop bundle && pnpm --filter @theseus/desktop exec electron-builder --win nsis --x64",
+    "dist:dir": "pnpm --filter @theseus/desktop bundle && pnpm --filter @theseus/desktop exec electron-builder --dir"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

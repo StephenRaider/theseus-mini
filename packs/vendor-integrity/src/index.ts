@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
  * Declarative part: pack.yaml + playbooks/*.yaml (loaded by @theseus/core).
  * Code part: deterministic validators and rules the tools are built on.
  */
-export const PACK_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
+// Installed app: read-only assets are shipped next to the app (THESEUS_ASSETS); otherwise this package.
+export const PACK_DIR = process.env.THESEUS_ASSETS ? join(process.env.THESEUS_ASSETS, "packs/vendor-integrity") : join(dirname(fileURLToPath(import.meta.url)), "..");
 
 export * from "./validators/pan.ts";
 export * from "./validators/gstin.ts";

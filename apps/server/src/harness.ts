@@ -57,6 +57,8 @@ export async function createHarness(opts: HarnessOptions) {
 }
 
 export const REPO_ROOT = join(import.meta.dirname, "../../..");
+/** Writable data (.env, .theseus/ logs and spend): the repo in dev, THESEUS_HOME (per-user dir) in the installed app. */
+export const DATA_ROOT = process.env.THESEUS_HOME ?? REPO_ROOT;
 
 export type Provider = "gemini" | "anthropic";
 
@@ -100,7 +102,7 @@ export function modelFromEnv(opts: { cache?: boolean } = {}): ModelAdapter {
   if (!provider) throw new Error(`No live model: ${noLiveModelReason()}.`);
   let m: ModelAdapter;
   if (provider === "anthropic") {
-    meter = new SpendMeter(Number(process.env.ANTHROPIC_BUDGET_USD ?? 12), join(REPO_ROOT, ".theseus/anthropic-spend.json"));
+    meter = new SpendMeter(Number(process.env.ANTHROPIC_BUDGET_USD ?? 12), join(DATA_ROOT, ".theseus/anthropic-spend.json"));
     m = new AnthropicAdapter({
       meter,
       ...(process.env.ANTHROPIC_MODEL ? { model: process.env.ANTHROPIC_MODEL } : {}),
@@ -110,9 +112,9 @@ export function modelFromEnv(opts: { cache?: boolean } = {}): ModelAdapter {
   } else {
     const model = process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite";
     m = new GeminiAdapter({ apiKey: process.env.GEMINI_API_KEY ?? "", model });
-    m = withRateLimit(m, new RateLimiter({ rpm: Number(process.env.GEMINI_RPM ?? 15), rpd: Number(process.env.GEMINI_RPD ?? 500), usageFile: join(REPO_ROOT, ".theseus/usage.json") }));
+    m = withRateLimit(m, new RateLimiter({ rpm: Number(process.env.GEMINI_RPM ?? 15), rpd: Number(process.env.GEMINI_RPD ?? 500), usageFile: join(DATA_ROOT, ".theseus/usage.json") }));
   }
-  if (opts.cache) m = withCache(m, join(REPO_ROOT, ".theseus/model-cache"));
+  if (opts.cache) m = withCache(m, join(DATA_ROOT, ".theseus/model-cache"));
   return m;
 }
 
@@ -124,7 +126,7 @@ export { ScriptedModel };
  * Keeps the newest 40 files so the folder doesn't grow forever.
  */
 export function recorder(label: string): { log: EventLog; trace: (m: ModelAdapter) => ModelAdapter; dir: string; stamp: string } {
-  const dir = join(REPO_ROOT, ".theseus/runs");
+  const dir = join(DATA_ROOT, ".theseus/runs");
   const stamp = `${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}-${label}`;
   try {
     const old = readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort();

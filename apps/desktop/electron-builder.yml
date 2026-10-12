@@ -1,0 +1,55 @@
+# Packaging for the Theseus desktop app.
+#   pnpm dist:win   Windows NSIS installer (run on a Windows PC) -> apps/desktop/release/
+#   pnpm dist:dir   unpacked app for the current platform (local verification)
+# The installer is UNSIGNED (Windows SmartScreen will warn once).
+appId: com.theseus.mini
+publish: null
+productName: Theseus
+copyright: Theseus
+directories:
+  output: release
+  buildResources: build
+icon: build/icon.png
+
+# What goes inside app.asar. Everything the app runs is already bundled by esbuild
+# into dist/ (main.js, preload.cjs, host.mjs, web/); only playwright-core stays a package.
+files:
+  - package.json
+  - dist/**
+  - "!dist/**/*.map"
+  - "!dist/node_modules"
+asar: true
+
+extraResources:
+  # Read-only assets read from disk at runtime (the role pack): resources/packs/...
+  - from: ../../packs/vendor-integrity
+    to: packs/vendor-integrity
+    filter:
+      - pack.yaml
+      - playbooks/**
+  # playwright-core can't be bundled (and has its own CLI for the first-run browser download).
+  # As resources/node_modules it sits outside the asar and is found by the host
+  # (dist/host.mjs inside app.asar resolves packages up to resources/node_modules).
+  - from: dist/node_modules/playwright-core
+    to: node_modules/playwright-core
+    filter:
+      - "**/*"
+      - "!**/*.md"
+      - "!types/**"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Theseus
+linux:
+  target: dir
+  category: Office
+  executableName: theseus
