@@ -510,7 +510,21 @@ export class Kernel {
     try {
       const res = await this.opts.model.generate(req);
       this.emit(
-        { type: "model.called", payload: { callId, purpose: req.purpose, model: this.opts.model.name, ok: true, cached: !!res.cached, durationMs: Date.now() - t0, ...(taskId ? { taskId } : {}) } },
+        {
+          type: "model.called",
+          payload: {
+            callId,
+            purpose: req.purpose,
+            model: this.opts.model.name,
+            ok: true,
+            cached: !!res.cached,
+            durationMs: Date.now() - t0,
+            ...(res.usage?.costUsd !== undefined ? { costUsd: res.usage.costUsd } : {}),
+            ...(res.usage?.inputTokens !== undefined ? { inputTokens: res.usage.inputTokens } : {}),
+            ...(res.usage?.outputTokens !== undefined ? { outputTokens: res.usage.outputTokens } : {}),
+            ...(taskId ? { taskId } : {}),
+          },
+        },
         "system",
         taskId ? { taskId } : {},
       );
@@ -528,8 +542,10 @@ export class Kernel {
     }
   }
 
-  private json<T>(purpose: string, system: string, prompt: string, schema: z.ZodType<T>, taskId?: string): Promise<T> {
-    return generateJson((r) => this.callModel(r, taskId), { purpose, system, prompt, thinking: this.opts.thinking ?? "low" }, schema);
+  /** Reasoning effort per kind of call: judgement-heavy ones get a little more, everything else stays cheap. */
+  private json<T>(purpose: string, system: string, prompt: string, schema: z.ZodType<T>, taskId?: string, cacheSplit?: number): Promise<T> {
+    const thinking = this.opts.thinking ?? (["compose", "draft", "operate.plan"].includes(purpose) ? "medium" : "low");
+    return generateJson((r) => this.callModel(r, taskId), { purpose, system, prompt, thinking, ...(cacheSplit ? { cacheSplit } : {}) }, schema);
   }
 
   private system(run: { employeeId: string }) {
@@ -1490,13 +1506,8 @@ export class Kernel {
         }
         let turn: OperateTurn;
         try {
-          turn = await this.json(
-            "operate.step",
-            this.system(run),
-            operateTurnPrompt({ request: run.task.request, today: this.pack.today(), state: op, subgoal: idx, apps: this.pack.apps ?? [], tools: this.gateway.describe(), ...(op.seen.length ? { last: op.seen.at(-1)! } : {}), answers }),
-            OperateTurn,
-            run.task.id,
-          );
+          const p = operateTurnPrompt({ request: run.task.request, today: this.pack.today(), state: op, subgoal: idx, apps: this.pack.apps ?? [], tools: this.gateway.describe(), ...(op.seen.length ? { last: op.seen.at(-1)! } : {}), answers });
+          turn = await this.json("operate.step", this.system(run), p.prompt, OperateTurn, run.task.id, p.split);
         } catch (e) {
           this.blockLater(run, idx, "the model is unavailable");
           return { status: "needs_you", note: `Model unavailable: ${modelProblem(e)}`, question: { key: `model${op.turns}`, text: `I can't think right now (${modelProblem(e)}). Reply "go on" when it's back and I'll continue "${title}".` } };
@@ -2182,7 +2193,7 @@ export function acknowledge(request: string, taskId: string): string {
 
 function modelProblem(e: unknown): string {
   if (e instanceof ModelError) {
-    if (e.kind === "quota") return "today's model budget is used up";
+    if (e.kind === "quota") return e.message.startsWith("Claude") || e.message.startsWith("The Anthropic") ? e.message : "the model budget is used up";
     if (e.kind === "auth") return "the API key was rejected (check .env)";
     if (e.kind === "rate_limited") return "the model is rate-limited right now";
     if (e.kind === "network") return "the model couldn't be reached";

@@ -137,6 +137,10 @@ export const EventBody = z.discriminatedUnion("type", [
       cached: z.boolean().default(false),
       durationMs: z.number().nonnegative(),
       error: z.string().optional(),
+      /** What the call cost, when the provider is metered (Claude). */
+      costUsd: z.number().nonnegative().optional(),
+      inputTokens: z.number().int().nonnegative().optional(),
+      outputTokens: z.number().int().nonnegative().optional(),
     }),
   ),
   ev("plank.proposed", Plank),

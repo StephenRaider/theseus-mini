@@ -19,11 +19,17 @@ export interface ModelRequest {
   /** JSON Schema the reply must follow. */
   jsonSchema?: Record<string, unknown>;
   thinking?: ThinkingLevel;
+  /**
+   * Character offset in `prompt` where the part that stays identical between
+   * calls ends (tools, rules, instructions). Adapters with prompt caching put a
+   * cache breakpoint there; the rest ignore it. `prompt` is always the full text.
+   */
+  cacheSplit?: number;
 }
 
 export interface ModelResponse {
   text: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; costUsd?: number };
   cached?: boolean;
 }
 

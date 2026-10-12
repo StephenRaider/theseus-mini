@@ -212,6 +212,11 @@ export function operatePlanPrompt(args: { request: string; goal: string; index: 
   ].join("\n");
 }
 
+/**
+ * The prompt for one operate turn, STABLE PART FIRST (rules, tools, apps: identical on
+ * every turn of every task), then the volatile state. `split` marks where the stable part
+ * ends so a caching provider can read it from cache instead of paying for it each turn.
+ */
 export function operateTurnPrompt(args: {
   request: string;
   today: string;
@@ -221,27 +226,12 @@ export function operateTurnPrompt(args: {
   tools: ToolDescription[];
   last?: Seen;
   answers?: string[];
-}): string {
+}): { prompt: string; split: number } {
   const st = args.state;
   const sg = st.plan.subgoals;
   const history = st.seen.slice(-10).map((s) => `#${s.turn} ${s.ok ? "" : "FAILED "}${s.tool} ${argsLine(s.args)} → ${s.summary}`);
-  return [
-    `TODAY: ${args.today}`,
-    `REQUEST: ${args.request}`,
-    `GOAL: ${st.goal}`,
-    "",
-    "PLAN:",
-    ...sg.map((s, i) => `${i < args.subgoal ? "✓" : i === args.subgoal ? "→" : " "} ${i + 1}. ${s.title} (done when: ${s.doneWhen})`),
-    `YOU ARE ON SUBGOAL ${args.subgoal + 1}: ${sg[args.subgoal]!.title}`,
-    "",
-    args.apps.length ? `APPS you can open in the browser:\n${args.apps.map((a) => `- ${a.label}: ${a.url}${a.note ? ` (${a.note})` : ""}`).join("\n")}` : "",
-    `MEMORY (facts you saw, with where):\n${st.facts.length ? st.facts.map((f) => `- ${f.key} = ${f.value}   [seen: "${f.quote.slice(0, 90)}"]`).join("\n") : "(nothing yet)"}`,
-    st.inbox.length ? `MESSAGES FROM YOUR MANAGER WHILE YOU WORKED (follow them):\n${st.inbox.map((m) => `- ${m}`).join("\n")}` : "",
-    args.answers?.length ? `THE USER ANSWERED YOUR QUESTION:\n${args.answers.map((a) => `- ${a}`).join("\n")}` : "",
-    history.length ? `RECENT ACTIONS:\n${history.join("\n")}` : "RECENT ACTIONS: none yet",
-    st.notes.length ? `SYSTEM NOTES (important):\n${st.notes.map((n) => `- ${n}`).join("\n")}` : "",
-    "",
-    args.last ? `RESULT OF YOUR LAST ACTION (${args.last.tool}):\n${args.last.text}` : "No action yet: start with the first step of this subgoal.",
+  const stable = [
+    "You are doing a job by hand in the company's systems, ONE action per turn, and you see the result of each action before choosing the next.",
     "",
     "RULES:",
     "- Do ONE action per turn and wait for its result. Refs like e12 come from the latest page only.",
@@ -252,11 +242,33 @@ export function operateTurnPrompt(args: {
     "- If the system refuses for a business reason (a duplicate, an inactive record), don't force it: set cannot.",
     "- If the user rejected an action, don't try it again.",
     "",
+    args.apps.length ? `APPS you can open in the browser:\n${args.apps.map((a) => `- ${a.label}: ${a.url}${a.note ? ` (${a.note})` : ""}`).join("\n")}\n` : "",
     "TOOLS:",
     toolLines(args.tools),
+    "",
+    "=== THE JOB ===",
+    "",
+  ].join("\n");
+  const volatile = [
+    `TODAY: ${args.today}`,
+    `REQUEST: ${args.request}`,
+    `GOAL: ${st.goal}`,
+    "",
+    "PLAN:",
+    ...sg.map((s, i) => `${i < args.subgoal ? "✓" : i === args.subgoal ? "→" : " "} ${i + 1}. ${s.title} (done when: ${s.doneWhen})`),
+    `YOU ARE ON SUBGOAL ${args.subgoal + 1}: ${sg[args.subgoal]!.title}`,
+    "",
+    `MEMORY (facts you saw, with where):\n${st.facts.length ? st.facts.map((f) => `- ${f.key} = ${f.value}   [seen: "${f.quote.slice(0, 90)}"]`).join("\n") : "(nothing yet)"}`,
+    st.inbox.length ? `MESSAGES FROM YOUR MANAGER WHILE YOU WORKED (follow them):\n${st.inbox.map((m) => `- ${m}`).join("\n")}` : "",
+    args.answers?.length ? `THE USER ANSWERED YOUR QUESTION:\n${args.answers.map((a) => `- ${a}`).join("\n")}` : "",
+    history.length ? `RECENT ACTIONS:\n${history.join("\n")}` : "RECENT ACTIONS: none yet",
+    st.notes.length ? `SYSTEM NOTES (important):\n${st.notes.map((n) => `- ${n}`).join("\n")}` : "",
+    "",
+    args.last ? `RESULT OF YOUR LAST ACTION (${args.last.tool}):\n${args.last.text}` : "No action yet: start with the first step of this subgoal.",
   ]
     .filter((l) => l !== "")
     .join("\n");
+  return { prompt: stable + volatile, split: stable.length };
 }
 
 export function operateVerifyPrompt(args: { request: string; goal: string; criteria: string[]; facts: Fact[]; actions: string[]; tools: ToolDescription[]; apps: { label: string; url: string }[] }): string {

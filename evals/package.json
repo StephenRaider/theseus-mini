@@ -2,15 +2,23 @@
   "name": "@theseus/evals",
   "version": "0.1.0",
   "private": true,
-  "description": "Eval suite, runner and reports (pass^k).",
+  "description": "Live check suite: real scenarios with real models, checked against the mock world's ground truth, with a cost report.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./cases": "./src/cases.ts",
+    "./runner": "./src/runner.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "live:check": "tsx src/run.ts",
+    "live:ping": "tsx src/ping.ts"
   },
   "dependencies": {
-    "@theseus/protocol": "workspace:*"
+    "@theseus/core": "workspace:*",
+    "@theseus/kaveri": "workspace:*",
+    "@theseus/protocol": "workspace:*",
+    "@theseus/server": "workspace:*",
+    "zod": "^4.1.0"
   }
 }

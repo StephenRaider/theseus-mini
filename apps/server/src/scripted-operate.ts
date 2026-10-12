@@ -18,7 +18,7 @@ import type { ModelRequest, ScriptRule } from "@theseus/core";
 const request = (r: ModelRequest) => /REQUEST: (.*)/.exec(r.prompt)?.[1] ?? "";
 const subgoal = (r: ModelRequest) => Number(/YOU ARE ON SUBGOAL (\d+)/.exec(r.prompt)?.[1] ?? "1");
 const lastTool = (r: ModelRequest) => /RESULT OF YOUR LAST ACTION \(([^)]+)\)/.exec(r.prompt)?.[1];
-const lastResult = (r: ModelRequest) => /RESULT OF YOUR LAST ACTION \([^)]+\):\n([\s\S]*?)\nRULES:/.exec(r.prompt)?.[1] ?? "";
+const lastResult = (r: ModelRequest) => /RESULT OF YOUR LAST ACTION \([^)]+\):\n([\s\S]*)$/.exec(r.prompt)?.[1] ?? "";
 const memory = (r: ModelRequest): Record<string, string> => {
   const sec = /MEMORY \(facts you saw, with where\):\n([\s\S]*?)\n(?:[A-Z]{3,}|RECENT|SYSTEM|THE USER|MESSAGES)/.exec(r.prompt)?.[1] ?? "";
   return Object.fromEntries([...sec.matchAll(/^- (\w+) = (.*?)\s{3}\[seen/gm)].map((m) => [m[1]!, m[2]!]));

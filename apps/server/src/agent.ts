@@ -24,7 +24,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { EventLog } from "@theseus/core";
-import { REPO_ROOT, createHarness, modelFromEnv, recorder } from "./harness.ts";
+import { REPO_ROOT, claudeSpend, createHarness, modelFromEnv, recorder } from "./harness.ts";
 import { attachPrinter } from "./printer.ts";
 import { scriptedModel } from "./scripted.ts";
 import { inProcessWorld, liveWorld } from "./world.ts";
@@ -115,7 +115,11 @@ const timer = setInterval(async () => {
   if (!busyTask && !waitingOnYou) {
     clearInterval(timer);
     const calls = kernel.log.ofType("model.called");
-    console.log(`\n\x1b[2mModel calls this run: ${calls.length} (${calls.filter((c) => c.payload.cached).length} cached). Events: ${kernel.log.events.length}.\x1b[0m`);
+    const usd = calls.reduce((n, c) => n + (c.payload.costUsd ?? 0), 0);
+    const total = claudeSpend();
+    console.log(
+      `\n\x1b[2mModel calls this run: ${calls.length} (${calls.filter((c) => c.payload.cached).length} cached)${usd ? ` · this run $${usd.toFixed(3)}` : ""}${total ? ` · Claude total $${total.spent.toFixed(2)} of $${total.capUsd.toFixed(2)} cap` : ""}. Events: ${kernel.log.events.length}.\x1b[0m`,
+    );
     await exit(0);
   }
 }, 500);

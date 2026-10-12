@@ -6,7 +6,9 @@ What makes it a platform and not one program: a fixed **keel** (planning, tool g
 
 The first employee type is a **Vendor & Contractor Integrity Specialist** at *Kaveri Infra Pvt Ltd* (fictional). Its job is to make sure the company only pays the right party, the right amount, into the right account. It was chosen because the work is concrete, high-stakes and checkable, which is what an autonomous worker has to be trusted with.
 
-> Status: **M3c, computer use.** Employees now operate the company's web apps in a real browser (Chromium via Playwright): they open pages, read them, fill and submit forms, recover when a session expires or a page errors, ask before anything irreversible, and an independent verifier re-reads the result fresh. The brief's own example ("find the latest invoice from X, extract the amount and due date, enter it into our internal system, tell me when done") runs end to end against **FinDesk**, a legacy AP system with no API. See [Computer use](#computer-use-operate-mode).
+> Status: **M3d, Claude integrated + live check suite.** The employees can run on Claude (Sonnet 5.5 for judgement, Haiku 5.5 for triage and summaries, low effort, prompt caching, a hard spend cap) or on Gemini. `pnpm live:check` runs 14 real scenarios against the live model and checks the outcomes against the mock company's ground truth, with a cost report ([evals/README.md](evals/README.md)).
+>
+> Before that, **M3c, computer use.** Employees now operate the company's web apps in a real browser (Chromium via Playwright): they open pages, read them, fill and submit forms, recover when a session expires or a page errors, ask before anything irreversible, and an independent verifier re-reads the result fresh. The brief's own example ("find the latest invoice from X, extract the amount and due date, enter it into our internal system, tell me when done") runs end to end against **FinDesk**, a legacy AP system with no API. See [Computer use](#computer-use-operate-mode).
 >
 > Before that, **M3b: live agent loop, wired into the desktop app.** A real kernel runs each employee end to end: it looks around first (inbox, portals, workspace files), decides how to handle the request (a whole playbook, part of one, or a plan it composes from its tools for a task it has never seen), works through every item with deterministic checks, asks before anything irreversible, takes your messages mid-work without stopping, verifies on a fresh read and reports. The desktop app now runs the real employees (in their own process) and shows all of it: Theseus hands your request to an employee, the plan grid fills in live, approvals and questions appear in the chat, and your messages steer the work while it runs. Underneath: contracts, role pack, deterministic checks and the mock company *Kaveri Infra* (six websites + a workspace of real Excel/PDF/Word files, 12 planted traps).
 
@@ -44,7 +46,7 @@ pnpm agent --scripted "Run the integrity check on this week's payment batch"   #
 pnpm agent "Empanel the three bidders who qualified on T-2026-14"              # live model (needs .env)
 ```
 
-Copy `.env.example` to `.env` and set `GEMINI_API_KEY` (free tier; `GEMINI_MODEL=gemini-3.5-flash-lite` by default). While it runs, type to talk to the employee: `hold everything to Shree Ganesh`, `skip PL-07`, `how far are you?`, `pause`, `resume`; decide approvals with `approve apr_001` / `reject apr_001`. Each run starts a fresh in-process copy of the company world (and regenerates `workspace/`), so runs are repeatable. Options: `--approve all|none`, `--pace 300` (slow down to watch and interrupt), `--cache` (reuse identical model answers), `--live-world` (use the running `pnpm kaveri` and watch the sites change in a browser), `--log run.jsonl`.
+Copy `.env.example` to `.env` and set a key: `GEMINI_API_KEY` (free tier; `GEMINI_MODEL=gemini-3.5-flash-lite` by default) or `ANTHROPIC_API_KEY` with `MODEL_PROVIDER=anthropic` (metered, with `ANTHROPIC_BUDGET_USD` as a hard cap; see [evals/README.md](evals/README.md)). While it runs, type to talk to the employee: `hold everything to Shree Ganesh`, `skip PL-07`, `how far are you?`, `pause`, `resume`; decide approvals with `approve apr_001` / `reject apr_001`. Each run starts a fresh in-process copy of the company world (and regenerates `workspace/`), so runs are repeatable. Options: `--approve all|none`, `--pace 300` (slow down to watch and interrupt), `--cache` (reuse identical model answers), `--live-world` (use the running `pnpm kaveri` and watch the sites change in a browser), `--log run.jsonl`.
 
 ### Computer use (operate mode)
 
@@ -99,7 +101,7 @@ What it can be asked (the employee picks the route itself):
 | `apps/server` | Wires a harness (kernel + pack + model + world); the **agent host** the desktop app runs in its own process (plays Theseus, the manager, too); the `pnpm agent` CLI; an in-process world for tests; a scripted stand-in model | ✅ M3b |
 | `apps/web` | Three-column UI (React + Vite): employee list with live status and red/yellow/green badges, chat with day separators, approval cards and nudges, plan grid with item actions, Files and Activity tabs. In the desktop app it shows the **live employees** (questions, standing instructions, what they looked at); in a plain browser it falls back to the M3 replay | ✅ M3b |
 | `apps/desktop` | Electron shell. Only the main process touches the disk, through `FileSandbox` (granted folders only, symlink-escape checks, never overwrites); it forks the agent host and relays its events; the UI gets a narrow typed bridge (`window.theseus`) | ✅ M3b |
-| `evals` | Task suite + pass^k reports | ⏳ |
+| `evals` | Live check suite: 14 scenarios against a real model, answer keys from the mock company's own state, cost report (`pnpm live:ping`, `pnpm live:check`). Pass^k and A/B model comparison come next | ✅ M3d (first cut) |
 
 ## Key ideas (short)
 
@@ -128,6 +130,7 @@ What it can be asked (the employee picks the route itself):
 | [Razorpay IFSC dataset](https://github.com/razorpay/ifsc) (`ifsc` npm) | Offline IFSC existence + bank names | MIT |
 | [Razorpay IFSC API](https://ifsc.razorpay.com) | Live branch details (falls back to offline if unreachable) | Public, free |
 | zod, yaml, vitest, TypeScript | Schemas, YAML, tests | MIT / ISC |
+| Anthropic SDK (`@anthropic-ai/sdk`), Claude Sonnet 5.5 and Haiku 5.5 | The live model option (metered) | MIT |
 | Playwright (`playwright-core`) + Chromium | The employees' browser (computer use) | Apache-2.0 / BSD |
 | jszip | Reading Word (.docx) files | MIT |
 | Electron, React, Vite, esbuild | Desktop app and UI | MIT |

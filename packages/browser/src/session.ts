@@ -262,21 +262,27 @@ export class BrowserSession {
     this.lastStatus = undefined;
     this.dialog = undefined;
     const nDownloads = this.downloads.length;
-    // Did the action start loading a new page? (a navigation request or a frame navigation)
-    let started = false;
+    // Did the action start loading something? A navigation REQUEST goes out first; then either the page
+    // COMMITS (a new document) or the response is a file and a DOWNLOAD event follows a moment later.
+    let requested = false;
+    let committed = false;
     const onRequest = (r: { isNavigationRequest(): boolean; frame(): unknown }) => {
-      if (r.isNavigationRequest() && r.frame() === this.page.mainFrame()) started = true;
+      if (r.isNavigationRequest() && r.frame() === this.page.mainFrame()) requested = true;
     };
     const onNav = (f: unknown) => {
-      if (f === this.page.mainFrame()) started = true;
+      if (f === this.page.mainFrame()) committed = true;
     };
+    const downloaded = () => this.downloads.length > nDownloads;
     this.page.on("request", onRequest);
     this.page.on("framenavigated", onNav);
     try {
       await fn();
       if (mayNavigate) {
-        for (let i = 0; i < 8 && !started && this.downloads.length === nDownloads; i++) await this.page.waitForTimeout(50);
-        if (started) await this.page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+        // Give the click a moment to start something (a JS handler may navigate a few ms later)…
+        for (let i = 0; i < 8 && !requested && !committed && !downloaded(); i++) await this.page.waitForTimeout(50);
+        // …then wait for the page to commit or the file to arrive (never both: a download keeps the page as it was).
+        for (let i = 0; i < 100 && requested && !committed && !downloaded(); i++) await this.page.waitForTimeout(50);
+        if (committed) await this.page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
       }
     } catch (e) {
       const msg = (e as Error).message.split("\n")[0] ?? "";

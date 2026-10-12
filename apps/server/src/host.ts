@@ -20,7 +20,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Kernel } from "@theseus/core";
 import { THESEUS_ID, nextEmployeeName, type Command, type Employee, type TheseusEvent } from "@theseus/protocol";
-import { REPO_ROOT, createHarness, modelFromEnv, recorder } from "./harness.ts";
+import { REPO_ROOT, createHarness, modelFromEnv, noLiveModelReason, providerFromEnv, recorder } from "./harness.ts";
 import { scriptedModel } from "./scripted.ts";
 import { inProcessWorld } from "./world.ts";
 
@@ -83,14 +83,14 @@ export class AgentHost {
   }): Promise<AgentHost> {
     const envFile = join(REPO_ROOT, ".env");
     if (existsSync(envFile)) process.loadEnvFile(envFile);
-    const hasKey = !!process.env.GEMINI_API_KEY?.trim();
+    const hasKey = !!providerFromEnv();
     const mode: HostMode = opts.mode ?? (hasKey ? "live" : "demo");
     let note: string | undefined;
     let model;
     if (mode === "live" && hasKey) model = modelFromEnv();
     else {
       model = scriptedModel();
-      note = mode === "live" ? "No GEMINI_API_KEY in .env, so running the demo model instead" : undefined;
+      note = mode === "live" ? `${noLiveModelReason()[0]!.toUpperCase()}${noLiveModelReason().slice(1)}, so running the demo model instead` : undefined;
     }
     // The sites listen on free local ports so the employees' browser can open them.
     const world = await inProcessWorld({ ...(opts.workspaceDir ? { workspaceDir: opts.workspaceDir } : {}), listen: true });
@@ -136,7 +136,7 @@ export class AgentHost {
     k.log.append({ type: "employee.created", payload: theseus }, { actor: "system", employeeId: THESEUS_ID });
     const how =
       this.info.mode === "live"
-        ? `I'm running live on ${this.info.model.replace(/^gemini:/, "")}.`
+        ? `I'm running live on ${this.info.model.replace(/^(gemini|anthropic):/, "")}.`
         : `I'm running in demo mode (a scripted model that knows the example requests below; tools, checks and the company systems are real).${this.info.note ? ` ${this.info.note}.` : ""}`;
     k.postMessage(
       THESEUS_ID,
