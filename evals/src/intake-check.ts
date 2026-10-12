@@ -141,7 +141,7 @@ export function checkIntake(s: Snapshot, orig: Map<string, string>, said: string
   for (const m of T.missing)
     for (const t of m.types) {
       const re = DOC_SYNONYM[t]!;
-      checks.push(ck(`A request to ${m.vendor} for the ${t} is drafted`, s.drafts.some((d) => d.includes(lc(m.vendor).split(" ")[0]!) && re.test(d)) || new RegExp(`${lc(m.vendor).split(" ")[0]}[^]{0,400}${re.source}`).test(lc(said)) && s.drafts.length > 0));
+      checks.push(ck(`A request to ${m.vendor} for the ${t} is drafted`, s.drafts.some((d) => d.includes(lc(m.vendor).split(" ")[0]!) && re.test(d))));
     }
   return checks;
 }
