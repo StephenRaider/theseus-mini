@@ -25,6 +25,15 @@ export interface ModelRequest {
    * cache breakpoint there; the rest ignore it. `prompt` is always the full text.
    */
   cacheSplit?: number;
+  /** Pictures for the model to look at (scans, photos of documents), placed before the prompt text. */
+  images?: ModelImage[];
+}
+
+export interface ModelImage {
+  mime: string;
+  base64: string;
+  /** For logs and for the offline stand-in models. */
+  name?: string;
 }
 
 export interface ModelResponse {
@@ -181,7 +190,7 @@ export function withCache(model: ModelAdapter, dir: string): ModelAdapter {
     name: model.name,
     async generate(req) {
       const key = createHash("sha256")
-        .update(JSON.stringify([model.name, req.system, req.prompt, req.jsonSchema ?? null]))
+        .update(JSON.stringify([model.name, req.system, req.prompt, req.jsonSchema ?? null, (req.images ?? []).map((i) => createHash("sha1").update(i.base64).digest("hex"))]))
         .digest("hex")
         .slice(0, 32);
       const file = join(dir, `${key}.json`);

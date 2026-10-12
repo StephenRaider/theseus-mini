@@ -12,6 +12,7 @@ export * from "./log.ts";
 export * from "./model.ts";
 export * from "./gemini.ts";
 export * from "./anthropic.ts";
+export * from "./proxy.ts";
 export * from "./gateway.ts";
 export * from "./program.ts";
 export * from "./triage.ts";

@@ -43,7 +43,7 @@ export class GeminiAdapter implements ModelAdapter {
   body(req: ModelRequest): Record<string, unknown> {
     return {
       systemInstruction: { parts: [{ text: req.system }] },
-      contents: [{ role: "user", parts: [{ text: req.prompt }] }],
+      contents: [{ role: "user", parts: [...(req.images ?? []).map((i) => ({ inlineData: { mimeType: i.mime, data: i.base64 } })), { text: req.prompt }] }],
       generationConfig: {
         ...(req.jsonSchema ? { responseMimeType: "application/json", responseJsonSchema: req.jsonSchema } : {}),
         ...(req.thinking ? { thinkingConfig: { thinkingLevel: req.thinking } } : {}),

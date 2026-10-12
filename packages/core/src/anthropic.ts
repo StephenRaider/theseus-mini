@@ -195,12 +195,14 @@ export class AnthropicAdapter implements ModelAdapter {
     const system = req.jsonSchema
       ? `${req.system}\n\nReply with ONE JSON object only (no prose, no code fences) that matches this JSON Schema:\n${JSON.stringify(req.jsonSchema)}`
       : req.system;
+    const pictures = (req.images ?? []).map((i) => ({ type: "image", source: { type: "base64", media_type: i.mime, data: i.base64 } }));
     const content = split
       ? [
           { type: "text", text: req.prompt.slice(0, split), cache_control: { type: "ephemeral" } },
+          ...pictures,
           { type: "text", text: req.prompt.slice(split) },
         ]
-      : [{ type: "text", text: req.prompt }];
+      : [...pictures, { type: "text", text: req.prompt }];
     return {
       model,
       max_tokens: MAX_TOKENS[req.purpose] ?? 6000,

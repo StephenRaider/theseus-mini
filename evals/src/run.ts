@@ -10,11 +10,13 @@
  *   pnpm live:check --budget 2               stop starting new cases once this run has cost $2
  *   pnpm live:check --retry-failed           run failed cases once more (tells flaky from consistent)
  *   pnpm live:check --scripted               no key: the offline stand-in model (checks the suite itself)
+ *   pnpm live:check --proxy <dir>            no API: every model request is written to <dir> and answered by
+ *                                            someone (a Claude subagent) who writes the reply file; see evals/README.md
  *   pnpm live:check --list                   show the cases and their cost estimates
  */
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { withTrace, type ModelAdapter } from "@theseus/core";
+import { FileQueueModel, withTrace, type ModelAdapter } from "@theseus/core";
 import { claudeSpend, modelFromEnv, REPO_ROOT, providerFromEnv, noLiveModelReason } from "@theseus/server";
 import { scriptedModel } from "@theseus/server/scripted";
 import { listOption } from "./args.ts";
@@ -37,7 +39,7 @@ if (flag("list")) {
 }
 
 const scripted = flag("scripted");
-if (!scripted && !providerFromEnv()) {
+if (!scripted && !opt("proxy") && !providerFromEnv()) {
   console.error(`No live model: ${noLiveModelReason()}. Add the key to the .env file at the project root (see evals/README.md), or use --scripted to check the suite itself.`);
   process.exit(2);
 }
@@ -58,7 +60,19 @@ const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 const dir = join(REPO_ROOT, ".theseus/live-check");
 mkdirSync(dir, { recursive: true });
 const traceFile = join(dir, `${stamp}.model.jsonl`);
-const base: ModelAdapter = scripted ? scriptedModel() : modelFromEnv({ cache: flag("cache") });
+const proxyDir = opt("proxy");
+const queue = proxyDir ? new FileQueueModel({ dir: proxyDir }) : undefined;
+if (proxyDir) {
+  rmSync(join(proxyDir, "DONE"), { force: true });
+  process.on("exit", () => {
+    try {
+      writeFileSync(join(proxyDir, "DONE"), "");
+    } catch {
+      /* the marker is a courtesy to whoever answers the requests */
+    }
+  });
+}
+const base: ModelAdapter = queue ?? (scripted ? scriptedModel() : modelFromEnv({ cache: flag("cache") }));
 const model = withTrace(base, traceFile);
 const mark = (id: string, attempt: number) => appendFileSync(traceFile, `${JSON.stringify({ marker: "case", id, attempt, at: new Date().toISOString() })}\n`);
 const est = picked.reduce((n, c) => n + c.estimateUsd, 0) * repeat;
@@ -80,6 +94,7 @@ const attempt = async (c: LiveCase, label: string, attemptNo: number): Promise<C
   }
   process.stdout.write(`▶ ${c.id}${label} … `);
   mark(c.id, attemptNo);
+  if (queue) queue.caseId = c.id;
   const r = await runCase(c, {
     model: () => model,
     eventsDir,
