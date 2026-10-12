@@ -16,16 +16,19 @@ import { watch, type FSWatcher } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+import { ensureChromium } from "./browsers.ts";
+import { ENV_TEMPLATE, resolvePaths } from "./paths.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url)); // apps/desktop/dist
 const REPO_ROOT = path.resolve(here, "../../..");
-const WEB_DIST = path.resolve(here, "../../web/dist");
+// THESEUS_HOME set -> keep all state (incl. Electron's userData) in that folder.
+if (process.env.THESEUS_HOME) app.setPath("userData", process.env.THESEUS_HOME);
+const PATHS = resolvePaths({ isPackaged: app.isPackaged, userData: app.getPath("userData"), resourcesPath: process.resourcesPath, here, repoRoot: REPO_ROOT, env: process.env });
+const WEB_DIST = PATHS.webDist;
 const DEV_URL = process.env.THESEUS_DEV_URL; // set by scripts/run.mjs in dev mode
 
-const WORKSPACE_DIR =
-  process.env.THESEUS_WORKSPACE ??
-  process.env.KAVERI_WORKSPACE ??
-  (app.isPackaged ? path.join(app.getPath("documents"), "Theseus Workspace") : path.join(REPO_ROOT, "workspace"));
+const WORKSPACE_DIR = PATHS.workspace;
 
 /* ------------------------------------------------------------------ settings (granted folders) */
 
@@ -108,6 +111,9 @@ let backlog: unknown[] = [];
 /** Latest browser frame per employee (live view of computer use). */
 let frames = new Map<string, unknown>();
 
+/** Shown by the browser tool if Chromium isn't there (yet). */
+const browserHint = "Theseus downloads its browser once on first run (about 150 MB, needs internet). If that download has not finished or was interrupted, restart Theseus and try again.";
+
 /**
  * Fork apps/server/src/host.ts with tsx, using Electron's own Node. The kernel,
  * the company world and the model calls all live there; this process only relays.
@@ -117,11 +123,18 @@ function startHost(mode?: HostMode) {
   frames = new Map();
   hostInfo = null;
   hostError = null;
-  const script = path.join(REPO_ROOT, "apps/server/src/host.ts");
-  const child = fork(script, mode ? [mode] : [], {
-    cwd: REPO_ROOT,
-    execArgv: ["--import", "tsx"],
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", THESEUS_WORKSPACE: WORKSPACE_DIR },
+  // Dev: the TypeScript source through tsx. Installed: the bundled dist/host.mjs (no tsx, no repo).
+  const child = fork(PATHS.hostScript, mode ? [mode] : [], {
+    cwd: PATHS.home ?? REPO_ROOT,
+    execArgv: PATHS.installed ? [] : ["--import", "tsx"],
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      THESEUS_WORKSPACE: WORKSPACE_DIR,
+      ...(PATHS.home ? { THESEUS_HOME: PATHS.home } : {}),
+      ...(PATHS.assets ? { THESEUS_ASSETS: PATHS.assets } : {}),
+      ...(PATHS.browsers ? { PLAYWRIGHT_BROWSERS_PATH: PATHS.browsers, THESEUS_BROWSER_HINT: browserHint } : {}),
+    },
     stdio: ["ignore", "inherit", "inherit", "ipc"],
   });
   host = child;
@@ -262,6 +275,56 @@ function registerIpc() {
   });
 }
 
+/* ------------------------------------------------------------------ settings file + menu */
+
+/** Creates <home>/.env from the template if missing, and opens it in the default editor. */
+async function openSettingsFile() {
+  const file = PATHS.envFile;
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, ENV_TEMPLATE, { flag: "wx" }).catch((e: NodeJS.ErrnoException) => {
+    if (e.code !== "EEXIST") throw e;
+  });
+  const err = await shell.openPath(file);
+  if (err) void dialog.showMessageBox({ type: "error", message: "Couldn't open the settings file", detail: `${file}\n\n${err}` });
+}
+
+function restartAgent() {
+  stopHost();
+  win?.webContents.send("agent:reset");
+  startHost(process.env.THESEUS_MODE === "live" || process.env.THESEUS_MODE === "demo" ? process.env.THESEUS_MODE : undefined);
+}
+
+function buildMenu() {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      { label: "File", submenu: [{ role: "quit" }] },
+      { role: "editMenu" },
+      {
+        label: "Settings",
+        submenu: [
+          { label: "Open settings file (.env)", click: () => void openSettingsFile() },
+          { label: "Open data folder", click: () => void shell.openPath(PATHS.home ?? REPO_ROOT) },
+          { label: "Restart agent (reload settings)", click: restartAgent },
+        ],
+      },
+      { role: "viewMenu" },
+    ]),
+  );
+}
+
+/* ------------------------------------------------------------------ browser (computer use): first-run download */
+
+async function setupBrowser() {
+  if (!PATHS.browsers || process.env.THESEUS_CHROMIUM) return;
+  try {
+    const playwrightDir = path.dirname(createRequire(import.meta.url).resolve("playwright-core/package.json"));
+    const r = await ensureChromium({ browsersPath: PATHS.browsers, playwrightDir, log: (l) => console.log(`[browser] ${l}`) });
+    if (r === "failed") win?.webContents.send("agent:status", { info: hostInfo, error: "The browser download did not finish. Check your internet connection and restart Theseus. Tasks that need a browser will not work until then." });
+  } catch (e) {
+    console.log(`[browser] setup skipped: ${(e as Error).message}`);
+  }
+}
+
 /* ------------------------------------------------------------------ window */
 
 // app:// serves the built UI (safer and more predictable than file://).
@@ -285,7 +348,7 @@ async function createWindow() {
     minHeight: 640,
     title: "Theseus",
     backgroundColor: "#0F0F0F",
-    autoHideMenuBar: true,
+    autoHideMenuBar: !PATHS.installed,
     webPreferences: {
       preload: path.join(here, "preload.cjs"),
       contextIsolation: true,
@@ -309,7 +372,7 @@ async function createWindow() {
 
 app.setName("Theseus");
 app.whenReady().then(async () => {
-  Menu.setApplicationMenu(null);
+  buildMenu();
   serveApp();
   settings = await loadSettings();
   for (const r of settings.extraRoots) {
@@ -321,6 +384,7 @@ app.whenReady().then(async () => {
   }
   await ensureWorkspace().catch((e) => console.error("[theseus] workspace:", e));
   for (const r of sandbox.list()) watchRoot(r);
+  if (PATHS.installed) void setupBrowser();
   startHost(process.env.THESEUS_MODE === "live" || process.env.THESEUS_MODE === "demo" ? process.env.THESEUS_MODE : undefined);
   registerIpc();
   await createWindow();

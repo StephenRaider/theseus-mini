@@ -83,6 +83,34 @@ What it can be asked (the employee picks the route itself):
 | Hands-on job across systems | "Find the latest invoice from Hoysala Steel, extract the amount and due date, enter it into FinDesk and tell me once it's done" | plans subgoals, then works one action at a time in mail, files and a real browser; asks before posting (operate mode) |
 | Out of scope | "Write me a poem" | politely refused |
 
+## Install on Windows
+
+Build the installer on a Windows PC (Node 22+, pnpm 10):
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+The installer lands in `apps/desktop/release/` as `Theseus Setup <version>.exe` (NSIS: pick the install folder, Start menu and desktop shortcuts, uninstaller). `pnpm dist:dir` builds an unpacked app for the current platform instead (to check the packaging without installing).
+
+The installer is **unsigned**: the first time, Windows SmartScreen says "Windows protected your PC". Click "More info", then "Run anyway". (Signing needs a certificate; add it to `apps/desktop/electron-builder.yml` when you have one.)
+
+Where things live once installed (`%APPDATA%\Theseus`, the app's user data folder):
+
+| What | Where |
+| --- | --- |
+| API keys and settings | `%APPDATA%\Theseus\.env` |
+| Workspace (register, templates, drafts, attachments) | `%APPDATA%\Theseus\workspace\` |
+| Logs and spend counter | `%APPDATA%\Theseus\.theseus\` (`runs\`, `anthropic-spend.json`) |
+| Browser for computer use | `%APPDATA%\Theseus\browsers\` |
+
+**Set the API key:** in the app menu choose **Settings > Open settings file (.env)**. The file is created from a template on first use. Put your `ANTHROPIC_API_KEY=` (or `GEMINI_API_KEY=`) in it, save, then choose **Settings > Restart agent (reload settings)**. With no key Theseus runs in demo mode (scripted answers, real tools), so you can try it straight away.
+
+**First browser use:** the installer does not include Chromium. On first start the app downloads it once (about 150 MB, needs internet) into `browsers\`. If it fails, the app says so and retries on the next start; everything else works meanwhile.
+
+For maintainers: the installed app runs the agent from one bundled file (`dist/host.mjs`, built by `apps/desktop/scripts/run.mjs dist`), reads the role pack from the app's `resources/packs/`, and decides every path in `apps/desktop/src/paths.ts` (`THESEUS_HOME` = writable dir, `THESEUS_ASSETS` = read-only assets; both unset in dev, where nothing changes).
+
 ## How this repo is worked on
 
 - **Claude** (cloud) writes the code, tests and docs, and runs the full check before delivering.

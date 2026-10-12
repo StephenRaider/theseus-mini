@@ -51,3 +51,4 @@ workspace/
 
 # Local model usage counter and response cache (pnpm agent)
 .theseus/
+apps/desktop/release/

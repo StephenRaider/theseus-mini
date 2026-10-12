@@ -21,7 +21,7 @@ import { BIDDERS, COMPANY } from "./seed/scenario.ts";
  */
 export const MARKER = ".kaveri-workspace";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-export const DEFAULT_WORKSPACE = process.env.KAVERI_WORKSPACE ?? join(REPO_ROOT, "workspace");
+export const DEFAULT_WORKSPACE = process.env.KAVERI_WORKSPACE ?? join(process.env.THESEUS_HOME ?? REPO_ROOT, "workspace");
 
 export const WORKSPACE_FILES = {
   register: "Vendor Desk/Vendor Register.xlsx",
