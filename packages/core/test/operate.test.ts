@@ -82,7 +82,7 @@ describe("file tools: search inside documents, read Word", () => {
 /* ------------------------------------------------------------------ found by the first live Claude run */
 import { extractJson } from "../src/model.ts";
 import { browserTools } from "../src/browsertools.ts";
-import { operateTurnPrompt, type OperateState } from "../src/operate.ts";
+import { operateTurnPrompt, operateVerifyPrompt, type OperateState } from "../src/operate.ts";
 
 describe("first live Claude run: replies and arguments real models actually produce", () => {
   it("reads the first JSON value even with text, a second object, or braces in prose around it", () => {
@@ -110,5 +110,12 @@ describe("first live Claude run: replies and arguments real models actually prod
     expect(prompt).toContain('args ["ref","about"]');
     expect(prompt).not.toContain('"expect"');
     expect(prompt).toMatch(/Never ask the user for permission to do something the request already asked for/);
+  });
+
+  it("the verifier is told to expect values that persist on a fresh read, not one-time confirmation messages", () => {
+    // Seen live: it expected the banner "posted to the ledger" (shown once after the click), failing a correct run.
+    const p = operateVerifyPrompt({ request: "r", goal: "g", criteria: ["c"], facts: [], actions: [], tools: [], apps: [] });
+    expect(p).toMatch(/Expect SHORT exact values that stay on the page/);
+    expect(p).toMatch(/NEVER expect a sentence or a confirmation message/);
   });
 });

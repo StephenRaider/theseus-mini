@@ -291,6 +291,8 @@ export function operateVerifyPrompt(args: { request: string; goal: string; crite
     "",
     "You are the VERIFIER. Don't trust what was done: choose fresh READ calls that show the real outcome in the systems now,",
     "and the exact values that must appear in them if the job really succeeded (e.g. open the saved record's page and expect its number, amount and due date).",
+    "Expect SHORT exact values that stay on the page: ids, numbers, amounts, dates, names, and status words as the page shows them (e.g. \"posted\", \"draft\").",
+    "NEVER expect a sentence or a confirmation message (\"Saved successfully\", \"…was posted to the ledger\"): those are shown once, right after the action, and are gone when the page is read fresh.",
     "Use only READ tools from this list:",
     toolLines(args.tools),
   ]
