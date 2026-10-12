@@ -372,7 +372,7 @@ function intakeCases(): LiveCase[] {
       estimateUsd: 0.6,
       before: prepare,
       after: async (c) => {
-        c.notes.sortedSnap = await snapshot(c.world.workspaceDir);
+        c.notes.sortedSnap = await snapshot(c.world.workspaceDir, mailDrafts(c));
         await c.kernel.command({ type: "undo_task", taskId: c.task.task.id });
         await c.kernel.settled();
         await grab(c);
