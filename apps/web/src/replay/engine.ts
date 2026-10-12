@@ -153,7 +153,7 @@ export class ReplayEngine {
 
   /** Start the scripted scenario (same as sending the suggested request to Theseus). */
   kickoff(text = this.script.request): void {
-    this.send({ type: "send_message", threadId: THESEUS_ID, text, attachments: [] });
+    this.send({ type: "send_message", threadId: THESEUS_ID, text, attachments: [], rehearse: false });
   }
 
   send(cmd: Command): void {

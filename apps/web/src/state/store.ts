@@ -4,7 +4,7 @@
  * later) answers with events, and `reduce` applies them. Same events in →
  * same screen out, which is what makes replay and audit possible.
  */
-import { applyPatch, type Approval, type Employee, type Message, type Plan, type Task, type TheseusEvent } from "@theseus/protocol";
+import { applyPatch, type Approval, type Employee, type Evidence, type Message, type Plan, type Task, type TheseusEvent } from "@theseus/protocol";
 
 export interface NudgeView {
   id: string;
@@ -23,6 +23,62 @@ export interface CheckView {
   checkId: string;
   verdict: "pass" | "fail" | "uncertain";
   detail: string;
+  evidenceIds: string[];
+  at: string;
+}
+
+export interface ToolCallView {
+  callId: string;
+  taskId: string;
+  itemId?: string;
+  stepId?: string;
+  tool: string;
+  input: unknown;
+  at: string;
+  done?: { ok: boolean; preview?: string; error?: string; durationMs: number; evidenceIds: string[]; at: string };
+}
+
+export interface VerificationView {
+  taskId: string;
+  results: { criterionId: string; verdict: "pass" | "fail" | "uncertain"; detail: string; evidenceIds: string[] }[];
+  at: string;
+}
+
+export interface EffectView {
+  id: string;
+  callId: string;
+  taskId?: string;
+  tool: string;
+  summary: string;
+  /** Present = the employee knows how to take it back. Treated as opaque. */
+  undo?: { tool: string; input: unknown };
+  at: string;
+  undone?: { ok: boolean; detail: string; by: string; at: string };
+}
+
+export interface PreviewRowView {
+  id: string;
+  callId: string;
+  taskId?: string;
+  tool: string;
+  input: unknown;
+  summary: string;
+  at: string;
+}
+
+export interface RehearsalOutcome {
+  decision: "applied" | "discarded";
+  applied: number;
+  failed: number;
+  by: string;
+  at: string;
+}
+
+export interface MemoryView {
+  id: string;
+  employeeId: string;
+  text: string;
+  taskId?: string;
   at: string;
 }
 
@@ -57,6 +113,19 @@ export interface OrientView {
 }
 
 export interface AppState {
+  evidence: Record<string, Evidence>;
+  evidenceOrder: string[];
+  toolCalls: Record<string, ToolCallView>;
+  toolCallOrder: string[];
+  verifications: Record<string, VerificationView>;
+  effects: Record<string, EffectView>;
+  effectOrder: string[];
+  /** Rehearsal rows per task, in the order they were previewed. */
+  previews: Record<string, PreviewRowView[]>;
+  rehearsals: Record<string, RehearsalOutcome>;
+  /** Live memories (memory.added minus memory.removed), in order. */
+  memories: Record<string, MemoryView>;
+  memoryOrder: string[];
   /** Questions employees asked you mid-work (Framework Spec §11). */
   questions: Record<string, QuestionView>;
   questionOrder: string[];
@@ -87,6 +156,17 @@ export interface AppState {
 }
 
 export const emptyState = (): AppState => ({
+  evidence: {},
+  evidenceOrder: [],
+  toolCalls: {},
+  toolCallOrder: [],
+  verifications: {},
+  effects: {},
+  effectOrder: [],
+  previews: {},
+  rehearsals: {},
+  memories: {},
+  memoryOrder: [],
   questions: {},
   questionOrder: [],
   constraints: {},
@@ -192,7 +272,7 @@ export function reduce(prev: AppState, e: TheseusEvent): AppState {
     }
     case "check.completed": {
       const p = e.payload;
-      s.checks = [...s.checks, { taskId: p.taskId, itemId: p.itemId, stepId: p.stepId, checkId: p.checkId, verdict: p.verdict, detail: p.detail, at: e.ts }];
+      s.checks = [...s.checks, { taskId: p.taskId, itemId: p.itemId, stepId: p.stepId, checkId: p.checkId, verdict: p.verdict, detail: p.detail, evidenceIds: p.evidenceIds ?? [], at: e.ts }];
       break;
     }
     case "question.asked": {
@@ -218,6 +298,72 @@ export function reduce(prev: AppState, e: TheseusEvent): AppState {
     case "constraint.lifted": {
       const c = s.constraints[e.payload.constraintId];
       if (c) s.constraints = { ...s.constraints, [c.id]: { ...c, lifted: { reason: e.payload.reason, at: e.ts } } };
+      break;
+    }
+    case "evidence.added": {
+      const ev = e.payload;
+      if (!s.evidence[ev.id]) s.evidenceOrder = [...s.evidenceOrder, ev.id];
+      s.evidence = { ...s.evidence, [ev.id]: ev };
+      break;
+    }
+    case "tool.called": {
+      const p = e.payload;
+      s.toolCalls = { ...s.toolCalls, [p.callId]: { callId: p.callId, taskId: p.taskId, ...(p.itemId ? { itemId: p.itemId } : {}), ...(p.stepId ? { stepId: p.stepId } : {}), tool: p.tool, input: p.input, at: e.ts } };
+      s.toolCallOrder = [...s.toolCallOrder, p.callId];
+      break;
+    }
+    case "tool.completed": {
+      const p = e.payload;
+      const c = s.toolCalls[p.callId];
+      if (c)
+        s.toolCalls = {
+          ...s.toolCalls,
+          [c.callId]: { ...c, done: { ok: p.ok, ...(p.preview !== undefined ? { preview: p.preview } : {}), ...(p.error ? { error: p.error.message } : {}), durationMs: p.durationMs, evidenceIds: p.evidenceIds ?? [], at: e.ts } },
+        };
+      break;
+    }
+    case "verification.completed": {
+      const p = e.payload;
+      s.verifications = { ...s.verifications, [p.taskId]: { taskId: p.taskId, results: p.results.map((r) => ({ ...r, evidenceIds: r.evidenceIds ?? [] })), at: e.ts } };
+      break;
+    }
+    case "effect.recorded": {
+      const p = e.payload;
+      if (!s.effects[p.id]) s.effectOrder = [...s.effectOrder, p.id];
+      s.effects = { ...s.effects, [p.id]: { ...(s.effects[p.id] ?? {}), id: p.id, callId: p.callId, ...(p.taskId ? { taskId: p.taskId } : {}), tool: p.tool, summary: p.summary, ...(p.undo ? { undo: p.undo } : {}), at: p.at } };
+      break;
+    }
+    case "effect.undone": {
+      const p = e.payload;
+      const f = s.effects[p.effectId];
+      // A failed attempt must not hide an earlier success.
+      if (f && !f.undone?.ok) s.effects = { ...s.effects, [f.id]: { ...f, undone: { ok: p.ok, detail: p.detail, by: p.by, at: e.ts } } };
+      break;
+    }
+    case "effect.previewed": {
+      const p = e.payload;
+      const tid = p.taskId ?? s.toolCalls[p.callId]?.taskId;
+      if (!tid) break;
+      s.previews = { ...s.previews, [tid]: [...(s.previews[tid] ?? []), { id: p.id, callId: p.callId, taskId: tid, tool: p.tool, input: p.input, summary: p.summary, at: p.at }] };
+      break;
+    }
+    case "rehearsal.resolved": {
+      const p = e.payload;
+      s.rehearsals = { ...s.rehearsals, [p.taskId]: { decision: p.decision, applied: p.applied, failed: p.failed, by: p.by, at: e.ts } };
+      const t = s.tasks[p.taskId];
+      if (t) s.tasks = { ...s.tasks, [t.id]: { ...t, rehearsal: p.decision } };
+      break;
+    }
+    case "memory.added": {
+      const p = e.payload;
+      if (!s.memories[p.id]) s.memoryOrder = [...s.memoryOrder, p.id];
+      s.memories = { ...s.memories, [p.id]: { id: p.id, employeeId: p.employeeId, text: p.text, ...(p.taskId ? { taskId: p.taskId } : {}), at: p.at } };
+      break;
+    }
+    case "memory.removed": {
+      const { [e.payload.id]: _gone, ...rest } = s.memories;
+      s.memories = rest;
+      s.memoryOrder = s.memoryOrder.filter((id) => id !== e.payload.id);
       break;
     }
     case "orient.completed":
