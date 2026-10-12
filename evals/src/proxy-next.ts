@@ -29,7 +29,7 @@ for (;;) {
     const out = join(dir, `res-${req.id}.json`);
     console.log(`REQUEST ${req.id}  case=${req.case}  purpose=${req.purpose}${p.length > 1 ? `  (${p.length - 1} more waiting)` : ""}`);
     console.log(`WRITE YOUR REPLY TO: ${out}`);
-    console.log("REPLY FORMAT: ONLY the JSON object (no prose, no code fences) that matches the schema.");
+    console.log(req.jsonSchema ? "REPLY FORMAT: ONLY the JSON object (no prose, no code fences) that matches the schema." : "REPLY FORMAT: this request has NO schema: write the plain text answer the prompt asks for (not JSON).");
     console.log("\n===== SYSTEM =====\n" + req.system);
     console.log("\n===== JSON SCHEMA =====\n" + JSON.stringify(req.jsonSchema));
     if (req.images.length) console.log(`\n===== IMAGES (open each with the Read tool) =====\n${req.images.map((i) => `${i.file}${i.name ? `  (${i.name})` : ""}`).join("\n")}`);

@@ -57,7 +57,7 @@ export const OperateTurn = z.object({
     .object({ tool: z.string(), args: z.record(z.string(), z.string()) })
     .optional()
     .describe("The ONE next action (tool + args as strings)"),
-  subgoalDone: z.object({ proof: z.string().describe("Exact text you can see that shows it's done") }).optional(),
+  subgoalDone: z.object({ proof: z.string().describe("ONE contiguous quote, copied character for character from a single line of a result you were shown, that shows it's done (never several fragments joined together)") }).optional(),
   askUser: z.string().optional().describe("Only if you cannot continue without the user (missing information, an ambiguous choice)"),
   cannot: z.string().optional().describe("If this subgoal cannot be done at all (e.g. the system refuses it as a duplicate): why, in one sentence"),
   report: z.string().optional().describe("Only with the LAST subgoal done: 2–4 sentences for your manager with the key facts"),
@@ -218,6 +218,7 @@ export function operatePlanPrompt(args: { request: string; goal: string; index: 
     "You will do this job yourself, by hand, in the company's systems (web apps, mailbox, files), one action at a time.",
     "First write a short plan: 2–6 SUBGOALS in order, each something you can see is finished. Don't plan clicks; plan outcomes.",
     "Prefer the dedicated tools when they exist (mail, files, lookups); use the browser for systems that have no tool.",
+    "If the company has a policy or SOP that covers this kind of job (filing rules, naming, required documents), the FIRST subgoal is to read it (search the files for \"policy\") and follow it. Use batch tools (read_many, move_many) when working through many files.",
     "Anything that can't be undone (posting, sending, releasing) is planned as its own subgoal, and ONLY if the request asks for it. Do NOT plan a separate \"get approval\" subgoal: when you attempt such an action the system pauses and asks the user for approval by itself, so just plan the action (e.g. \"Post it to the ledger\").",
     "",
     "WHAT EXISTS (apps, emails, files):",

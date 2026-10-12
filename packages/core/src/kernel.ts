@@ -287,6 +287,7 @@ export class Kernel {
   readonly runs = new Map<string, TaskRun>();
   private approvals = new Map<string, PendingApproval>();
   private questions = new Map<string, OpenQuestion>();
+  private visionCache = new Map<string, Promise<string>>();
   private busy = 0;
   private settleWaiters: (() => void)[] = [];
   private loops = new Set<Promise<void>>();
@@ -299,8 +300,17 @@ export class Kernel {
       tools: opts.pack.tools,
       allowed: opts.pack.manifest.tools.map((t) => t.name),
       sleep: opts.sleep,
-      vision: async (images, instruction, taskId) =>
-        (await this.callModel({ purpose: "vision.transcribe", system: "You read documents exactly as printed. You never guess.", prompt: instruction, images, thinking: "minimal" }, taskId)).text,
+      vision: (images, instruction, taskId) => {
+        // The same picture is read once per task, however many times it is opened (duplicates, re-reads).
+        const key = `${taskId ?? ""}|${createHash("sha1").update(images.map((i) => i.base64).join("|")).digest("hex")}`;
+        let p = this.visionCache.get(key);
+        if (!p) {
+          p = this.callModel({ purpose: "vision.transcribe", system: "You read documents exactly as printed. You never guess.", prompt: instruction, images, thinking: "minimal" }, taskId).then((r) => r.text);
+          p.catch(() => this.visionCache.delete(key));
+          this.visionCache.set(key, p);
+        }
+        return p;
+      },
     });
     this.gateway.addTool(this.memoryTool());
     this.loadMemory();
