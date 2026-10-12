@@ -1422,7 +1422,7 @@ export class Kernel {
       this.setStatus(run, "failed", (e as Error).message);
       return false;
     }
-    run.operate = { goal: decision.goal, plan, facts: [], seen: [], turns: 0, inbox: [], notes: [], answers: {} };
+    run.operate = { goal: decision.goal, plan, facts: [], seen: [], turns: 0, inbox: [], notes: [], deliver: [], answers: {} };
     const assumptions = [...decision.assumptions, ...plan.assumptions];
     run.plan = createPlan({ taskId: run.task.id, playbookId: "operate", playbookVersion: 1, steps: [{ id: "work", title: "Do" }, { id: "check", title: "Proof" }] });
     this.emitOrient(run, index, decision, assumptions);
@@ -1533,6 +1533,13 @@ export class Kernel {
           op.facts = [...op.facts.filter((f) => f.key !== r.key), fact];
         }
         if (turn.report) op.report = turn.report;
+        // Files to hand over: only paths the employee really saw or created (never an invented one).
+        for (const d of turn.deliver ?? []) {
+          const want = d.replace(/\\/g, "/").replace(/^\.?\//, "");
+          const known = op.seen.some((s) => s.ok && (s.text.replace(/\\/g, "/").includes(want) || argsLine(s.args).replace(/\\/g, "/").includes(want)));
+          if (known && !op.deliver.includes(want)) op.deliver.push(want);
+          else if (!known) op.notes.push(`NOT delivered "${d}": that path isn't in anything you saw. Download or save the file first, then deliver its exact path.`);
+        }
 
         if (turn.cannot) {
           for (const it of run.plan!.items.slice(idx + 1))
@@ -1997,8 +2004,22 @@ export class Kernel {
     const verifyLine = failedChecks.length
       ? `\nVerifier: ${failedChecks.map((r) => `${r.verdict === "fail" ? "✗" : "?"} ${r.criterion}: ${r.detail}`).join(" · ")}`
       : `\nVerifier: all ${results.length} check${results.length === 1 ? "" : "s"} passed on a fresh read.`;
-    this.say(run, report + verifyLine);
+    this.say(run, report + verifyLine, await this.deliverables(run));
     this.setStatus(run, "done");
+  }
+
+  /**
+   * Files to attach to the final answer so the user can open them from the chat: what the employee chose to
+   * deliver (operate mode), plus files it saved or downloaded during this task (a letter, a report, the invoice PDF).
+   */
+  private async deliverables(run: TaskRun): Promise<{ name: string; mime: string; ref: string }[]> {
+    const paths: string[] = [...(run.operate?.deliver ?? [])];
+    for (const e of this.log.ofType("evidence.added"))
+      if (e.taskId === run.task.id && e.payload.kind === "document" && e.payload.ref && /\b(saved|downloaded)\b/i.test(e.payload.summary) && !/^Evidence\//.test(e.payload.ref)) paths.push(e.payload.ref);
+    const unique = [...new Set(paths.map((p) => p.replace(/\\/g, "/")))];
+    // The employee's explicit choice first, then the most recent files; at most four.
+    const chosen = [...unique.filter((p) => run.operate?.deliver.includes(p)), ...unique.filter((p) => !run.operate?.deliver.includes(p)).slice(-4)].slice(0, 4);
+    return chosen.map((p) => ({ name: p.split("/").pop()!, mime: mimeOf(p), ref: `workspace:${p}` }));
   }
 
   /**
@@ -2195,6 +2216,19 @@ export function acknowledge(request: string, taskId: string): string {
   for (const ch of taskId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return lines[h % lines.length]!;
 }
+
+const MIME: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  csv: "text/csv",
+  txt: "text/plain",
+  md: "text/markdown",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+};
+export const mimeOf = (path: string) => MIME[path.toLowerCase().split(".").pop() ?? ""] ?? "application/octet-stream";
 
 function modelProblem(e: unknown): string {
   if (e instanceof ModelError) {

@@ -104,7 +104,7 @@ describe("first live Claude run: replies and arguments real models actually prod
 
   it("the model is not shown system-filled arguments, and is told not to ask permission for what was requested", () => {
     const tools = browserTools({ pool: {} as never, sandbox: {} as never, rootId: "w", rules: [] }).map((t) => ({ name: t.name, description: t.description, risk: t.risk, input: { properties: { ref: {}, expect: {}, about: {} } } as Record<string, unknown> }));
-    const state: OperateState = { goal: "g", plan: { subgoals: [{ title: "Post it", doneWhen: "posted" }], successCriteria: ["c"], assumptions: [] }, facts: [], seen: [], turns: 0, inbox: [], notes: [], answers: {} };
+    const state: OperateState = { goal: "g", plan: { subgoals: [{ title: "Post it", doneWhen: "posted" }], successCriteria: ["c"], assumptions: [] }, facts: [], seen: [], turns: 0, inbox: [], notes: [], deliver: [], answers: {} };
     const { prompt } = operateTurnPrompt({ request: "r", today: "2026-10-12", state, subgoal: 0, apps: [], tools });
     expect(prompt).toContain('browser.click (write): ');
     expect(prompt).toContain('args ["ref","about"]');

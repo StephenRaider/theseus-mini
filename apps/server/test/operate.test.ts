@@ -67,6 +67,10 @@ describe("operate mode: the brief's example, done in a real browser", () => {
     const v = kernel.log.ofType("verification.completed").at(-1)!.payload.results;
     expect(v.every((r) => r.verdict === "pass")).toBe(true);
     expect(v.map((r) => r.detail).join(" ")).toMatch(/fresh browser\.open .*AP-2026-0100.* shows HSF\/2026\/0447, 427160, 02\/11\/2026/);
+    // The invoice PDF the employee worked from is attached to its answer, so it can be opened from the chat.
+    const final = kernel.log.ofType("message.posted").at(-1)!.payload;
+    expect(final.attachments.map((a) => a.ref)).toContain("workspace:Invoices/Invoice_HSF_2026_0447.pdf");
+    expect(final.attachments.find((a) => a.name.endsWith(".pdf"))?.mime).toBe("application/pdf");
     const msg = lastMessage(kernel);
     expect(msg).toContain("AP-2026-0100");
     expect(msg).toContain("Verifier: all");

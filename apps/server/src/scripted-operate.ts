@@ -152,7 +152,7 @@ function step(r: ModelRequest): unknown {
   // 4. Fill and save.
   if (n === 4) {
     const saved = /Saved as draft (AP-\d{4}-\d{4})/.exec(res);
-    if (saved) return turn(`Saved as ${saved[1]}.`, { remember: [{ key: "findesk_doc", value: saved[1], quote: saved[0] }], subgoalDone: { proof: saved[0] }, ...(posting ? {} : { report: report(m, saved[1]!) }) });
+    if (saved) return turn(`Saved as ${saved[1]}.`, { remember: [{ key: "findesk_doc", value: saved[1], quote: saved[0] }], subgoalDone: { proof: saved[0] }, ...(posting ? {} : { report: report(m, saved[1]!) }), deliver: [`Invoices/${m.invoice_pdf ?? ""}`] });
     if (/Duplicate: invoice/.test(res)) return turn("FinDesk refuses: it's a duplicate.", { cannot: /\[alert\] (Duplicate[^\n]*)/.exec(res)?.[1] ?? "duplicate invoice" });
     if (/TEMPORARILY_UNAVAILABLE|HTTP 50\d/.test(res)) return act("FinDesk had a temporary error; opening the form again.", "browser.open", { url: `${ap}/invoices/new` });
     if (!/Enter supplier invoice/.test(res)) return act("Going to the invoice form.", "browser.open", { url: `${ap}/invoices/new` });

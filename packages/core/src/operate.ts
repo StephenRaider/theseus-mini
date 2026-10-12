@@ -61,6 +61,11 @@ export const OperateTurn = z.object({
   askUser: z.string().optional().describe("Only if you cannot continue without the user (missing information, an ambiguous choice)"),
   cannot: z.string().optional().describe("If this subgoal cannot be done at all (e.g. the system refuses it as a duplicate): why, in one sentence"),
   report: z.string().optional().describe("Only with the LAST subgoal done: 2–4 sentences for your manager with the key facts"),
+  deliver: z
+    .array(z.string())
+    .max(5)
+    .optional()
+    .describe("Workspace paths of files to hand to the user with your answer (e.g. the invoice PDF they asked for). Only paths you actually saw or saved."),
 });
 export type OperateTurn = z.infer<typeof OperateTurn>;
 
@@ -114,6 +119,8 @@ export interface OperateState {
   /** Kernel notes for the next turn (rejected memory, failed proof, repeated failure). */
   notes: string[];
   report?: string;
+  /** Files the employee chose to hand over with its answer (validated against what it really saw). */
+  deliver: string[];
   /** Answers to askUser, by subgoal index. */
   answers: Record<number, string[]>;
 }
@@ -248,6 +255,7 @@ export function operateTurnPrompt(args: {
     "- remember: every fact needs an exact quote from a result you were shown. Remember the values the user asked for.",
     "- When this subgoal is visibly done, set subgoalDone with the proof text (and remember anything you need later). No action needed in that turn.",
     "- If the system refuses for a business reason (a duplicate, an inactive record), don't force it: set cannot.",
+    "- If the user asked for a file (\"give me the invoice\", \"send me the report\"), put its workspace path in deliver so it is attached to your answer. Download it from the mail first if it is only an attachment.",
     "- If the user rejected an action, don't try it again.",
     "- Never ask the user for permission to do something the request already asked for. Actions that can't be undone pause for approval automatically when you attempt them: just attempt them. Use askUser only for information you are missing.",
     "",
