@@ -135,6 +135,7 @@ export function norm(s: string): string {
     .toLowerCase()
     .replace(/₹|\brs\.?\s*|inr\s*/g, "")
     .replace(/(\d),(?=\d)/g, "$1")
+    .replace(/\\[nrt]/g, " ") // a newline inside a JSON string is shown as backslash-n: it is only a space
     .replace(/["'“”‘’\\{}[\]]/g, "") // quotes, braces, brackets: a pretty-printed result still matches its compact quote
     .replace(/\s*([:,])\s*/g, "$1 ")
     .replace(/[\s ]+/g, " ")
@@ -156,6 +157,18 @@ export function appearsIn(needle: string, hay: string): boolean {
   return new RegExp(`${start}${esc}${end}`).test(h);
 }
 
+/**
+ * Is the value backed by what was seen? The value itself, or (for a value written in the model's own words, like
+ * "PAN card of X, AAHFV2209L") every token with a digit in it (amounts, dates, ids, file names) must appear.
+ */
+function valueSupported(value: string, quote: string, text: string): boolean {
+  if (appearsIn(value, quote) || appearsIn(value, text)) return true;
+  const tokens = (value.match(/[A-Za-z0-9][A-Za-z0-9\-/_.,]*/g) ?? []).map((t) => t.replace(/[.,]+$/, "")).filter((t) => /\d/.test(t));
+  if (!tokens.length) return true;
+  if (value.trim().split(/\s+/).length < 3) return false; // a short value with digits is a literal and must be literal
+  return tokens.every((t) => appearsIn(t, quote) || appearsIn(t, text));
+}
+
 /** Where (if anywhere) a fact's quote and value were seen. */
 export function sourceOf(fact: { value: string; quote: string }, seen: Seen[]): Seen | undefined {
   for (let i = seen.length - 1; i >= 0; i--) {
@@ -163,7 +176,7 @@ export function sourceOf(fact: { value: string; quote: string }, seen: Seen[]): 
     if (!s.ok) continue;
     // The quote must really be there. A value with digits (amount, date, id) must be there too; a plain-words value
     // (a rule, a name, a summary of the quote) may be a paraphrase of a quote that is.
-    if (appearsIn(fact.quote, s.text) && (!/\d/.test(fact.value) || appearsIn(fact.value, fact.quote) || appearsIn(fact.value, s.text))) return s;
+    if (appearsIn(fact.quote, s.text) && valueSupported(fact.value, fact.quote, s.text)) return s;
   }
   return undefined;
 }
@@ -304,7 +317,7 @@ export function operateVerifyPrompt(args: { request: string; goal: string; crite
     "You are the VERIFIER. Don't trust what was done: choose fresh READ calls that show the real outcome in the systems now,",
     "and the exact values that must appear in them if the job really succeeded (e.g. open the saved record's page and expect its number, amount and due date).",
     "Expect SHORT exact values that stay on the page: ids, numbers, amounts, dates, names, and status words as the page shows them (e.g. \"posted\", \"draft\").",
-    "NEVER expect a sentence or a confirmation message (\"Saved successfully\", \"…was posted to the ledger\"): those are shown once, right after the action, and are gone when the page is read fresh.",
+    "NEVER expect a sentence or a confirmation message (\"Saved successfully\", \"…was posted to the ledger\"): those are shown once, right after the action, and are gone when the page is read fresh. To check that something is gone or empty, expect the exact empty form the tool prints (for a file list: \"files: []\").",
     "Use only READ tools from this list:",
     toolLines(args.tools),
   ]

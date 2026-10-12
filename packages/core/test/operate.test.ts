@@ -26,6 +26,17 @@ describe("operate: evidence-bound memory", () => {
     expect(appearsIn('"path": "Downloads/Other.pdf"', '{\n  "path": "Downloads/Invoice.pdf"\n}')).toBe(false);
   });
 
+  it("a quote may span a line break of a text shown inside JSON, and a value may be the model's own words if its numbers are real", () => {
+    const shown = '{\n "text": "Permanent Account Number: AAHFV2209L\\nName: VRISHABHA EARTHMOVERS"\n}';
+    expect(appearsIn("Permanent Account Number: AAHFV2209L\nName: VRISHABHA EARTHMOVERS", shown)).toBe(true);
+    const s1: Seen[] = [{ turn: 1, subgoal: 0, tool: "files.read_text", args: {}, ok: true, text: shown, summary: "" }];
+    const q = { quote: "Permanent Account Number: AAHFV2209L" };
+    expect(sourceOf({ ...q, value: "PAN card of VRISHABHA EARTHMOVERS, AAHFV2209L (from pan_card.pdf)" }, s1)).toBe(s1[0]); // its only digit-token, AAHFV2209L, is real
+    expect(sourceOf({ ...q, value: "PAN card of VRISHABHA EARTHMOVERS, AAHFV2290L" }, s1)).toBeUndefined(); // a digit token that was never seen
+    expect(sourceOf({ ...q, value: "AAHFV2290L" }, s1)).toBeUndefined();
+    expect(sourceOf({ ...q, value: "AAHFV2209L" }, s1)).toBe(s1[0]);
+  });
+
   it("a fact is only remembered if its quote is really in something the agent was shown", () => {
     const s = [seen("TAX INVOICE\nInvoice No.:  HSF/2026/0447\nInvoice total:  Rs. 4,27,160.00")];
     expect(sourceOf({ value: "4,27,160.00", quote: "Invoice total:  Rs. 4,27,160.00" }, s)).toBe(s[0]);

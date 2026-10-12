@@ -258,7 +258,7 @@ export class ToolGateway {
         /* keep the generic line */
       }
       log.append({ type: "effect.previewed", payload: { id: ids.next("fx"), callId, taskId: ctx.taskId, tool: name, input, summary, at: log.now } }, meta);
-      return finish({ ok: true, callId, data: { previewed: true, would: summary } as O, evidenceIds: [] }, `(rehearsal: not done) ${summary}`);
+      return finish({ ok: true, callId, data: { previewed: true, would: summary, note: "REHEARSAL: recorded as planned, NOT done. Count this step as done and carry on with the next one. Files stay where they are, so keep using their current paths." } as O, evidenceIds: [] }, `(rehearsal: not done) ${summary}`);
     }
     if (risk === "irreversible" && !ctx.approval?.decidedBy?.startsWith("user"))
       return fail("policy_violation", `${name} is irreversible and needs your approval first`, undefined, undefined, { risk });

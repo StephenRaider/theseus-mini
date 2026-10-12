@@ -82,7 +82,7 @@ const ROW_WORDS: Record<string, RegExp> = {
   "PAN Card": /\bpan\b/,
   "Bid Form": /bid form/,
 };
-const rowFor = (rows: string[], vendor: string, type: string) => rows.find((r) => r.includes(vendor.toLowerCase().split(" ")[0]!) && (r.includes(type.toLowerCase()) || ROW_WORDS[type]!.test(r)));
+const rowsFor = (rows: string[], vendor: string, type: string) => rows.filter((r) => r.includes(vendor.toLowerCase().split(" ")[0]!) && (r.includes(type.toLowerCase()) || ROW_WORDS[type]!.test(r)));
 const DOC_SYNONYM: Record<string, RegExp> = { "Bank Proof": /bank proof|cancel+ed cheque|bank letter/, "Udyam Certificate": /udyam/, "Proprietor Declaration": /declaration/ };
 
 /** State of the folders vs the answer key. `said` = everything the employee told you. */
@@ -126,13 +126,12 @@ export function checkIntake(s: Snapshot, orig: Map<string, string>, said: string
   const missingWrong: string[] = [];
   for (const m of T.missing)
     for (const t of m.types) {
-      const row = rowFor(rows, m.vendor, t);
-      if (!row || !/missing|not received|outstanding|pending/.test(row)) missingWrong.push(`${m.vendor}: ${t}`);
+      if (!rowsFor(rows, m.vendor, t).some((r) => /missing|not received|outstanding|pending/.test(r))) missingWrong.push(`${m.vendor}: ${t}`);
     }
   checks.push(ck("The checklist marks exactly the documents that are missing as missing", missingWrong.length === 0, `not marked missing: ${missingWrong.join(", ")}`));
   const falseMissing = T.filed.filter((f) => {
-    const row = rowFor(rows, f.vendor, f.type);
-    return row && /missing|not received/.test(row) && !/received|yes|✓/.test(row);
+    const rs = rowsFor(rows, f.vendor, f.type);
+    return rs.length > 0 && rs.every((r) => /missing|not received/.test(r) && !/received|yes|✓/.test(r));
   });
   checks.push(ck("It does not claim a document is missing when it was received", falseMissing.length === 0, falseMissing.map((f) => `${f.vendor}: ${f.type}`).join(", ")));
 
