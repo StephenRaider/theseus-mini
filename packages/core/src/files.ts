@@ -202,6 +202,18 @@ export class FileSandbox {
     return target;
   }
 
+  /** Move or rename a file inside a root. Never overwrites: a taken name gets a free one. Returns the path used. */
+  async move(rootId: string, fromRel: string, toRel: string): Promise<string> {
+    const from = await this.resolve(rootId, fromRel);
+    const st = await fs.stat(from).catch(() => null);
+    if (!st?.isFile()) throw new SandboxError("not_found", `Not a file: ${fromRel}`);
+    const target = await this.freeName(rootId, toRel);
+    const abs = await this.resolve(rootId, target);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.rename(from, abs);
+    return target;
+  }
+
   /** Copy a file from anywhere on the computer INTO a root (how user attachments enter the sandbox). */
   async importFile(rootId: string, relDir: string, sourceAbs: string): Promise<string> {
     const st = await fs.stat(sourceAbs).catch(() => null);

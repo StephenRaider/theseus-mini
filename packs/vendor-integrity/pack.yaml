@@ -24,6 +24,9 @@ tools:
   - { name: files.search, risk: read, description: "Search workspace file names and contents" }
   - { name: files.save_text, risk: write, description: "Save a new text/CSV/Markdown file in the workspace (never overwrites)" }
   - { name: files.save_docx, risk: write, description: "Save a new Word document in the workspace (never overwrites)" }
+  - { name: files.save_xlsx, risk: write, description: "Save a new Excel workbook in the workspace (never overwrites)" }
+  - { name: files.move, risk: write, description: "Move or rename one workspace file (never overwrites; undoable)" }
+  - { name: files.trash, risk: write, description: "Put a file the employee created into .trash (used by Undo)" }
   - { name: eproc.list_tenders, risk: read, description: "List tenders on the e-procurement portal" }
   - { name: eproc.get_tender, risk: read, description: "Read a tender with its bidders, bid amounts and EMD guarantees" }
   - { name: eproc.download_document, risk: read, description: "Download a bidder's document from eProcure into the workspace" }

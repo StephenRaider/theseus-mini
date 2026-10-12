@@ -24,7 +24,9 @@ import {
   type ToolError,
 } from "@theseus/protocol";
 import { createHash } from "node:crypto";
-import type { z } from "zod";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { z } from "zod";
 import { ToolGateway, previewOf, type EvidenceInput, type GatewayResult, type StandingConstraint, type Tool } from "./gateway.ts";
 import { EventLog, IdMaker, type Clock } from "./log.ts";
 import { ModelError, generateJson, type ModelAdapter, type ModelRequest, type ModelResponse } from "./model.ts";
@@ -271,6 +273,8 @@ export interface KernelOptions {
   thinking?: ModelRequest["thinking"];
   /** Pause after every step (ms) so a person can follow along and nudge (demos). 0 = full speed. */
   stepDelayMs?: number;
+  /** Where employees' memories are kept between runs (a JSON file). Without it, memory lasts for this run only. */
+  memoryFile?: string;
 }
 
 const stableHash = (v: unknown) => createHash("sha1").update(JSON.stringify(v ?? null)).digest("hex").slice(0, 10);
@@ -295,7 +299,11 @@ export class Kernel {
       tools: opts.pack.tools,
       allowed: opts.pack.manifest.tools.map((t) => t.name),
       sleep: opts.sleep,
+      vision: async (images, instruction, taskId) =>
+        (await this.callModel({ purpose: "vision.transcribe", system: "You read documents exactly as printed. You never guess.", prompt: instruction, images, thinking: "minimal" }, taskId)).text,
     });
+    this.gateway.addTool(this.memoryTool());
+    this.loadMemory();
   }
 
   get pack() {
@@ -322,14 +330,20 @@ export class Kernel {
   }
 
   /** A message from you to an employee: a new task if idle, otherwise handled by the conversation lane. */
-  send(employeeId: string, text: string, opts: { from?: Actor } = {}): Promise<void> {
+  send(employeeId: string, text: string, opts: { from?: Actor; rehearse?: boolean } = {}): Promise<void> {
     return this.track(async () => {
       const st = this.mustEmployee(employeeId);
       this.post(employeeId, opts.from ?? "user", text, st.current?.task.id);
       const open = this.openQuestionsOf(employeeId);
       if (!st.current) {
         if (open.length) return this.answerQuestion(open[0]!.id, text, "user");
-        this.startTask(st, text);
+        const note = /^\s*(?:please\s+)?remember(?:\s+that|\s*:)?\s+(.{6,})$/is.exec(text);
+        if (note && !/\b(invoice|batch|vendor)\b.*\?$/i.test(text)) {
+          this.addMemory(employeeId, note[1]!.trim());
+          this.post(employeeId, `employee:${employeeId}`, `Noted. I'll remember that: "${note[1]!.trim()}". You can see and remove what I remember in my profile.`);
+          return;
+        }
+        this.startTask(st, text, opts.rehearse);
         return;
       }
       await this.converse(st, text);
@@ -341,7 +355,25 @@ export class Kernel {
     return this.track(async () => {
       switch (cmd.type) {
         case "send_message":
-          if (cmd.threadId !== THESEUS_ID) await this.send(cmd.threadId, cmd.text);
+          if (cmd.threadId !== THESEUS_ID) await this.send(cmd.threadId, cmd.text, { rehearse: cmd.rehearse === true });
+          return;
+        case "resolve_approvals":
+          for (const id of cmd.approvalIds) await this.resolveApproval(id, cmd.decision, cmd.comment);
+          return;
+        case "undo_effect":
+          await this.undoEffect(cmd.effectId);
+          return;
+        case "undo_task":
+          await this.undoTask(cmd.taskId);
+          return;
+        case "resolve_rehearsal":
+          await this.resolveRehearsal(cmd.taskId, cmd.decision);
+          return;
+        case "add_memory":
+          this.addMemory(cmd.employeeId, cmd.text);
+          return;
+        case "forget_memory":
+          this.forgetMemory(cmd.memoryId, "user");
           return;
         case "nudge":
           await this.send(cmd.employeeId, cmd.text);
@@ -549,7 +581,127 @@ export class Kernel {
   }
 
   private system(run: { employeeId: string }) {
-    return roleIntro(this.pack.manifest, this.mustEmployee(run.employeeId).employee.name);
+    const mem = this.memoriesOf(run.employeeId);
+    return (
+      roleIntro(this.pack.manifest, this.mustEmployee(run.employeeId).employee.name) +
+      (mem.length ? `\nThings you were told to remember (preferences and conventions from earlier work; follow them unless this request says otherwise):\n${mem.map((m) => `- ${m.text}`).join("\n")}` : "")
+    );
+  }
+
+  /* ------------------------------------------------------------------ trust: undo, rehearsal, memory */
+
+  /** Changes employees made, from the log; `undone` once taken back. */
+  effects(taskId?: string): { id: string; taskId?: string; summary: string; undo?: { tool: string; input: unknown }; undone: boolean }[] {
+    const undone = new Set(this.log.ofType("effect.undone").filter((e) => e.payload.ok).map((e) => e.payload.effectId));
+    return this.log
+      .ofType("effect.recorded")
+      .filter((e) => !taskId || e.payload.taskId === taskId)
+      .map((e) => ({ id: e.payload.id, ...(e.payload.taskId ? { taskId: e.payload.taskId } : {}), summary: e.payload.summary, ...(e.payload.undo ? { undo: e.payload.undo } : {}), undone: undone.has(e.payload.id) }));
+  }
+
+  private async undoEffect(effectId: string): Promise<boolean> {
+    const fx = this.effects().find((e) => e.id === effectId);
+    const by: Actor = `user:${this.opts.approver ?? "you"}`;
+    const rec = this.log.ofType("effect.recorded").find((e) => e.payload.id === effectId);
+    const meta = { employeeId: rec?.employeeId, ...(fx?.taskId ? { taskId: fx.taskId } : {}) };
+    const done = (ok: boolean, detail: string) => {
+      this.emit({ type: "effect.undone", payload: { effectId, by, ok, detail } }, "user", meta);
+      return ok;
+    };
+    if (!fx) return done(false, "No such change");
+    if (fx.undone) return done(false, "Already undone");
+    if (!fx.undo) return done(false, "This change can't be undone automatically");
+    const r = await this.gateway.call(fx.undo.tool, fx.undo.input, { employeeId: rec?.employeeId ?? "system", ...(fx.taskId ? { taskId: fx.taskId } : {}) });
+    return done(r.ok, r.ok ? `Undone: ${fx.summary}` : `Couldn't undo "${fx.summary}": ${r.error.message}`);
+  }
+
+  /** Take back everything a task changed, newest first. */
+  private async undoTask(taskId: string) {
+    const todo = this.effects(taskId).filter((e) => !e.undone && e.undo).reverse();
+    let ok = 0;
+    for (const e of todo) if (await this.undoEffect(e.id)) ok++;
+    const run = this.runs.get(taskId);
+    const emp = run?.employeeId ?? this.log.ofType("task.created").find((e) => e.payload.id === taskId)?.payload.employeeId;
+    if (emp) this.post(emp, `employee:${emp}`, todo.length ? `Undone: ${ok} of ${todo.length} change${todo.length === 1 ? "" : "s"} from that task${ok < todo.length ? " (the rest couldn't be taken back; see the list)" : ""}.` : "There was nothing to undo for that task.", taskId);
+  }
+
+  private async resolveRehearsal(taskId: string, decision: "apply" | "discard") {
+    const run = this.runs.get(taskId);
+    const emp = run?.employeeId ?? this.log.ofType("task.created").find((e) => e.payload.id === taskId)?.payload.employeeId;
+    if (!emp || !this.gateway.rehearsing.has(taskId)) return;
+    this.gateway.rehearsing.delete(taskId);
+    const by: Actor = `user:${this.opts.approver ?? "you"}`;
+    let applied = 0;
+    let failed = 0;
+    if (decision === "apply") {
+      for (const p of this.log.ofType("effect.previewed").filter((e) => e.taskId === taskId)) {
+        const r = await this.gateway.call(p.payload.tool, p.payload.input, { employeeId: emp, taskId });
+        if (r.ok) applied++;
+        else failed++;
+      }
+    }
+    this.emit({ type: "rehearsal.resolved", payload: { taskId, decision: decision === "apply" ? "applied" : "discarded", applied, failed, by } }, "user", { employeeId: emp, taskId });
+    this.emit({ type: "task.updated", payload: { taskId, changes: { rehearsal: decision === "apply" ? "applied" : "discarded" } } }, "system", { employeeId: emp, taskId });
+    this.post(emp, `employee:${emp}`, decision === "apply" ? `Applied ${applied} change${applied === 1 ? "" : "s"}${failed ? `; ${failed} failed (see the Changes list)` : ""}.` : "Discarded the rehearsal. Nothing was changed.", taskId);
+  }
+
+  memoriesOf(employeeId: string): { id: string; text: string }[] {
+    const gone = new Set(this.log.ofType("memory.removed").map((e) => e.payload.id));
+    return this.log.ofType("memory.added").filter((e) => e.payload.employeeId === employeeId && !gone.has(e.payload.id)).map((e) => ({ id: e.payload.id, text: e.payload.text }));
+  }
+
+  private addMemory(employeeId: string, text: string, taskId?: string, id = this.ids.next("mem")) {
+    const clean = text.replace(/\s+/g, " ").trim().slice(0, 300);
+    if (!clean || this.memoriesOf(employeeId).some((m) => m.text.toLowerCase() === clean.toLowerCase())) return;
+    this.emit({ type: "memory.added", payload: { id, employeeId, text: clean, ...(taskId ? { taskId } : {}), at: this.log.now } }, taskId ? `employee:${employeeId}` : "user", { employeeId, ...(taskId ? { taskId } : {}) });
+    this.saveMemory();
+  }
+
+  private forgetMemory(id: string, by: Actor) {
+    const m = this.log.ofType("memory.added").find((e) => e.payload.id === id);
+    if (!m || this.log.ofType("memory.removed").some((e) => e.payload.id === id)) return;
+    this.emit({ type: "memory.removed", payload: { id, by } }, "user", { employeeId: m.payload.employeeId });
+    this.saveMemory();
+  }
+
+  private memoryTool(): Tool {
+    return {
+      name: "memory.note",
+      description: "Remember a STABLE preference or convention for future tasks (e.g. how the user wants files named). Not for facts of this task. The user can see and remove it",
+      risk: "write",
+      idempotent: true,
+      input: z.object({ text: z.string().min(6).max(300) }),
+      output: "{ remembered }",
+      explain: async ({ text }) => ({ summary: `Remember: ${text}` }),
+      run: async ({ text }, ctx) => {
+        this.addMemory(ctx.employeeId, text, ctx.taskId);
+        return { remembered: text };
+      },
+    };
+  }
+
+  private loadMemory() {
+    const file = this.opts.memoryFile;
+    if (!file || !existsSync(file)) return;
+    try {
+      const list = JSON.parse(readFileSync(file, "utf8")) as { id: string; employeeId: string; text: string }[];
+      for (const m of list) this.emit({ type: "memory.added", payload: { id: m.id, employeeId: m.employeeId, text: m.text, at: this.log.now } }, "system", { employeeId: m.employeeId });
+    } catch {
+      /* a damaged memory file is ignored, never fatal */
+    }
+  }
+
+  private saveMemory() {
+    const file = this.opts.memoryFile;
+    if (!file) return;
+    const gone = new Set(this.log.ofType("memory.removed").map((e) => e.payload.id));
+    const list = this.log.ofType("memory.added").filter((e) => !gone.has(e.payload.id)).map((e) => ({ id: e.payload.id, employeeId: e.payload.employeeId, text: e.payload.text }));
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify(list, null, 2));
+    } catch {
+      /* memory is a convenience; a read-only disk must not stop work */
+    }
   }
 
   private packCtx(run: TaskRun): PackCtx {
@@ -579,9 +731,10 @@ export class Kernel {
 
   /* ------------------------------------------------------------------ task lifecycle */
 
-  private startTask(st: EmployeeState, request: string) {
+  private startTask(st: EmployeeState, request: string, rehearse = false) {
     const taskId = this.ids.next("task");
-    const task: Task = { id: taskId, employeeId: st.employee.id, request, successCriteria: [], status: "understanding", createdAt: this.log.now };
+    const task: Task = { id: taskId, employeeId: st.employee.id, request, successCriteria: [], status: "understanding", createdAt: this.log.now, ...(rehearse ? { rehearsal: "preview" as const } : {}) };
+    if (rehearse) this.gateway.rehearsing.add(taskId);
     let wakeFn = () => {};
     const run: TaskRun = {
       task,
@@ -1978,9 +2131,11 @@ export class Kernel {
     const plan = run.plan!;
     const ctx = { ...this.packCtx(run), plan };
     let results: VerifyResult[] = [];
+    const rehearsing = this.gateway.rehearsing.has(run.task.id);
     try {
       const v = run.playbook ? this.pack.verify?.[run.playbook.id] : undefined;
-      results = v ? await v(ctx) : run.operate ? [...genericVerify(plan), ...(await this.verifyOperate(run))] : run.program ? await this.verifyProgram(run) : genericVerify(plan);
+      if (rehearsing) results = [{ criterion: "Rehearsal", verdict: "pass", detail: "nothing was changed; every change below is only a preview" }];
+      else results = v ? await v(ctx) : run.operate ? [...genericVerify(plan), ...(await this.verifyOperate(run))] : run.program ? await this.verifyProgram(run) : genericVerify(plan);
     } catch (e) {
       results = [{ criterion: "Verification", verdict: "uncertain", detail: `The verifier couldn't run: ${(e as Error).message}` }];
     }
@@ -2004,7 +2159,11 @@ export class Kernel {
     const verifyLine = failedChecks.length
       ? `\nVerifier: ${failedChecks.map((r) => `${r.verdict === "fail" ? "✗" : "?"} ${r.criterion}: ${r.detail}`).join(" · ")}`
       : `\nVerifier: all ${results.length} check${results.length === 1 ? "" : "s"} passed on a fresh read.`;
-    this.say(run, report + verifyLine, await this.deliverables(run));
+    const previews = rehearsing ? this.log.ofType("effect.previewed").filter((e) => e.taskId === run.task.id) : [];
+    const rehearsalLine = rehearsing
+      ? `\n\nREHEARSAL: I did not change anything. ${previews.length ? `Here is what I would do (${previews.length} change${previews.length === 1 ? "" : "s"}):\n${previews.slice(0, 40).map((p) => `• ${p.payload.summary}`).join("\n")}${previews.length > 40 ? `\n• …and ${previews.length - 40} more` : ""}\nApply them, or discard.` : "There was nothing to change."}`
+      : "";
+    this.say(run, report + (rehearsing ? "" : verifyLine) + rehearsalLine, await this.deliverables(run));
     this.setStatus(run, "done");
   }
 

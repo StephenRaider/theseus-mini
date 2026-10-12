@@ -80,6 +80,8 @@ export interface Tool<I = any, O = any> {
    * constraints never block them: being cautious must stay cheap.
    */
   protective?: boolean;
+  /** Used by the system (undo), never offered to the model. */
+  internal?: boolean;
   /** Entity keys this call touches ("vendor:V-101"), used by standing constraints. */
   subjects?(input: I, ctx: CallContext): string[] | Promise<string[]>;
   /**
@@ -133,6 +135,8 @@ export interface ToolDescription {
 export class ToolGateway {
   private tools = new Map<string, Tool>();
   readonly constraints: StandingConstraint[] = [];
+  /** Tasks being rehearsed: their writes are previewed, not done. */
+  readonly rehearsing = new Set<string>();
   private done = new Map<string, { data: unknown; evidenceIds: string[] }>();
 
   constructor(
@@ -160,6 +164,12 @@ export class ToolGateway {
     return this.tools.has(name);
   }
 
+  /** Add a tool the system itself provides (memory, undo), after the pack's allow-list was applied. */
+  addTool(t: Tool): void {
+    if (this.tools.has(t.name)) throw new Error(`Duplicate tool "${t.name}"`);
+    this.tools.set(t.name, t);
+  }
+
   get(name: string): Tool | undefined {
     return this.tools.get(name);
   }
@@ -167,7 +177,7 @@ export class ToolGateway {
   /** What the model sees when it composes a plan from tools. */
   describe(filter?: (t: Tool) => boolean): ToolDescription[] {
     return [...this.tools.values()]
-      .filter((t) => !filter || filter(t))
+      .filter((t) => !t.internal && (!filter || filter(t)))
       .map((t) => ({ name: t.name, description: t.description, risk: t.risk, input: toModelSchema(t.input), ...(t.output ? { output: t.output } : {}) }));
   }
 
@@ -237,6 +247,18 @@ export class ToolGateway {
         if (e instanceof ToolFailure) return fail(e.cls, e.message, e.hint);
         throw e;
       }
+    }
+    // Rehearsal: say what would change, change nothing.
+    if (risk !== "read" && ctx.taskId && this.rehearsing.has(ctx.taskId)) {
+      let summary = `${name} ${JSON.stringify(input).slice(0, 200)}`;
+      try {
+        const ex = tool.explain ? await tool.explain(input, ctx) : undefined;
+        if (ex?.summary) summary = ex.summary;
+      } catch {
+        /* keep the generic line */
+      }
+      log.append({ type: "effect.previewed", payload: { id: ids.next("fx"), callId, taskId: ctx.taskId, tool: name, input, summary, at: log.now } }, meta);
+      return finish({ ok: true, callId, data: { previewed: true, would: summary } as O, evidenceIds: [] }, `(rehearsal: not done) ${summary}`);
     }
     if (risk === "irreversible" && !ctx.approval?.decidedBy?.startsWith("user"))
       return fail("policy_violation", `${name} is irreversible and needs your approval first`, undefined, undefined, { risk });

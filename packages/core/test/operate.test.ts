@@ -65,7 +65,7 @@ describe("file tools: search inside documents, read Word", () => {
     await fs.writeFile(path.join(root, "register.csv"), "vendor,amount\nHoysala Steel,427160\n");
     await fs.writeFile(path.join(root, "hoysala-notes.txt"), "nothing");
     const tools = fileTools(new FileSandbox([{ id: "w", label: "W", path: root }]), "w");
-    const ctx = { employeeId: "e", evidence: () => "ev" };
+    const ctx = { employeeId: "e", evidence: () => "ev", effect: () => {} };
     const search = tools.find((t) => t.name === "files.search")!;
     const read = tools.find((t) => t.name === "files.read_text")!;
 

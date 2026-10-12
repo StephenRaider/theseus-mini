@@ -1,4 +1,5 @@
 import { AlignmentType, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
+import { createHash } from "node:crypto";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { extractText, getDocumentProxy } from "unpdf";
@@ -12,6 +13,10 @@ import { ToolFailure, type Tool } from "./gateway.ts";
  * nothing outside a granted folder can be read or written, and saving never
  * overwrites an existing file.
  */
+
+const IMAGE_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
+const IMAGE_INSTRUCTION =
+  "This is a picture of a document (a scan or phone photo). Transcribe ALL the text on it exactly as printed, line by line, keeping labels and values together as 'Label: value'. Do not interpret or summarise. Put [illegible] where you cannot read something. If it is not a document, describe it in one line.";
 
 /** Text of a document, whatever its format. */
 export async function documentText(name: string, bytes: Uint8Array): Promise<string> {
@@ -79,21 +84,33 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
     risk: "read",
     idempotent: true,
     input: z.object({ folder: z.string().optional() }),
-    output: "{ files: [{ path, size, modified }] }",
+    output: "{ files: [{ path, size, modified, fingerprint }] } (same fingerprint = identical file)",
     async run({ folder }) {
-      const entries = await sandbox.walk(rootId, folder ?? "", 4).catch(sandboxFailure);
-      return { files: entries.filter((e) => e.kind === "file").map((e) => ({ path: e.rel, size: e.size, modified: new Date(e.mtimeMs).toISOString() })) };
+      const entries = (await sandbox.walk(rootId, folder ?? "", 5).catch(sandboxFailure)).filter((e) => e.kind === "file");
+      const files = [];
+      for (const e of entries.slice(0, 300)) {
+        const fingerprint = e.size <= 8 * 1024 * 1024 ? createHash("sha1").update(await sandbox.readBytes(rootId, e.rel).catch(() => Buffer.alloc(0))).digest("hex").slice(0, 8) : "";
+        files.push({ path: e.rel, size: e.size, modified: new Date(e.mtimeMs).toISOString(), fingerprint });
+      }
+      return { files };
     },
   };
   const read: Tool<{ path: string }> = {
     name: "files.read_text",
-    description: "Read a workspace file as text (PDF, Excel .xlsx, Word .docx, CSV, TXT)",
+    description: "Read a workspace file as text (PDF, Excel .xlsx, Word .docx, CSV, TXT, or a picture: JPG/PNG scans and photos are read by sight)",
     risk: "read",
     idempotent: true,
     input: z.object({ path: z.string() }),
     output: "{ path, text }",
     async run({ path }, ctx) {
       const bytes = await sandbox.readBytes(rootId, path).catch(sandboxFailure);
+      const mime = IMAGE_MIME[path.toLowerCase().split(".").pop() ?? ""];
+      if (mime) {
+        if (!ctx.vision) throw new ToolFailure("validation", `${path}: this is a picture and no model that can look at pictures is attached`);
+        const seen = await ctx.vision([{ mime, base64: Buffer.from(bytes).toString("base64"), name: path }], IMAGE_INSTRUCTION);
+        ctx.evidence({ kind: "document", summary: `Read ${path} (a picture, read by sight)`, source: `file:${path}`, ref: path });
+        return { path, text: `(picture, read by sight)\n${seen.trim()}` };
+      }
       const text = await documentText(path, bytes);
       ctx.evidence({ kind: "document", summary: `Read ${path}`, source: `file:${path}`, ref: path });
       return { path, text: text.length > 60_000 ? `${text.slice(0, 60_000)}\n…(truncated)` : text };
@@ -109,6 +126,7 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
     async run({ path, text }, ctx) {
       const used = await sandbox.writeNew(rootId, path, text).catch(sandboxFailure);
       ctx.evidence({ kind: "document", summary: `Saved ${used}`, source: `file:${used}`, ref: used });
+      ctx.effect({ summary: `Created ${used}`, undo: { tool: "files.trash", input: { path: used } } });
       return { path: used };
     },
   };
@@ -123,6 +141,66 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
       const rel = doc.path.toLowerCase().endsWith(".docx") ? doc.path : `${doc.path}.docx`;
       const used = await sandbox.writeNew(rootId, rel, await buildDocx(doc)).catch(sandboxFailure);
       ctx.evidence({ kind: "document", summary: `Saved ${used}`, source: `file:${used}`, ref: used });
+      ctx.effect({ summary: `Created ${used}`, undo: { tool: "files.trash", input: { path: used } } });
+      return { path: used };
+    },
+  };
+  const saveXlsx: Tool<{ path: string; sheets: { name: string; rows: string[][] }[] }> = {
+    name: "files.save_xlsx",
+    description: "Save a NEW Excel workbook (.xlsx) from sheets of rows (first row = header). Never overwrites",
+    risk: "write",
+    idempotent: false,
+    input: z.object({
+      path: z.string().describe('Workspace path, e.g. "Onboarding/Document Checklist.xlsx"'),
+      sheets: z.array(z.object({ name: z.string(), rows: z.array(z.array(z.string())) })).min(1).max(6),
+    }),
+    output: "{ path }",
+    async explain({ path, sheets }) {
+      return { summary: `Create ${path} (${sheets.map((s) => `${s.name}: ${Math.max(0, s.rows.length - 1)} rows`).join(", ")})` };
+    },
+    async run({ path, sheets }, ctx) {
+      const wb = new ExcelJS.Workbook();
+      for (const sh of sheets) {
+        const ws = wb.addWorksheet(sh.name.slice(0, 31));
+        sh.rows.forEach((r) => ws.addRow(r));
+        ws.getRow(1).font = { bold: true };
+        ws.columns.forEach((c) => (c.width = 28));
+      }
+      const rel = path.toLowerCase().endsWith(".xlsx") ? path : `${path}.xlsx`;
+      const used = await sandbox.writeNew(rootId, rel, new Uint8Array(await wb.xlsx.writeBuffer())).catch(sandboxFailure);
+      ctx.evidence({ kind: "document", summary: `Saved ${used}`, source: `file:${used}`, ref: used });
+      ctx.effect({ summary: `Created ${used}`, undo: { tool: "files.trash", input: { path: used } } });
+      return { path: used };
+    },
+  };
+  const move: Tool<{ from: string; to: string }> = {
+    name: "files.move",
+    description: "Move or rename ONE file inside the workspace (creates the folder; never overwrites; can be undone). Use it to file documents under a standard name",
+    risk: "write",
+    idempotent: false,
+    input: z.object({ from: z.string(), to: z.string().describe('New path including the new file name, e.g. "Onboarding/Nandi Roadways LLP/PAN Card - Nandi Roadways LLP.png"') }),
+    output: "{ from, to }",
+    async explain({ from, to }) {
+      return { summary: `Move ${from} → ${to}` };
+    },
+    async run({ from, to }, ctx) {
+      const used = await sandbox.move(rootId, from, to).catch(sandboxFailure);
+      ctx.evidence({ kind: "document", summary: `Filed ${from} as ${used}`, source: `file:${used}`, ref: used });
+      ctx.effect({ summary: `Moved ${from} → ${used}`, undo: { tool: "files.move", input: { from: used, to: from } } });
+      return { from, to: used };
+    },
+  };
+  const trash: Tool<{ path: string }> = {
+    name: "files.trash",
+    description: "Put a file the employee created into the hidden .trash folder (used by Undo)",
+    risk: "write",
+    idempotent: false,
+    internal: true,
+    input: z.object({ path: z.string() }),
+    output: "{ path }",
+    async run({ path }, ctx) {
+      const used = await sandbox.move(rootId, path, `.trash/${path}`).catch(sandboxFailure);
+      ctx.evidence({ kind: "document", summary: `Removed ${path} (kept in .trash)`, source: `file:${path}`, ref: path });
       return { path: used };
     },
   };
@@ -160,7 +238,7 @@ export function fileTools(sandbox: FileSandbox, rootId: string): Tool[] {
       return { matches };
     },
   };
-  return [list, read, search, save, saveDocx];
+  return [list, read, search, save, saveDocx, saveXlsx, move, trash];
 }
 
 /* ------------------------------------------------------------------ Word documents */

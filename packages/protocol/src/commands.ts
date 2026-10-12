@@ -15,7 +15,7 @@ export const Command = z.discriminatedUnion("type", [
     text: z.string().min(1),
     attachments: z.array(Attachment).default([]),
     /** Rehearse first: reads run, but nothing is changed; the employee shows what it would do, you apply or discard. */
-    rehearse: z.boolean().default(false),
+    rehearse: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("nudge"),
