@@ -14,6 +14,7 @@ pnpm live:check --cases operate      one or more cases by id (comma separated)
 pnpm live:check --headed --slowmo 300   watch the employee's browser work
 pnpm live:check --budget 1.5         stop starting new cases once this run has cost $1.50
 pnpm live:check --retry-failed       run each failed case once more (flaky vs consistent)
+pnpm live:why <case>                 why did that case fail? (the story from its saved log; no cost)
 pnpm live:check --scripted           no key: the offline stand-in model (checks the suite itself, free)
 ```
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scriptedModel } from "@theseus/server/scripted";
 import { CASES, SETS } from "../src/cases.ts";
+import { summarizeEvents } from "../src/why.ts";
 import { formatReport, runCase } from "../src/runner.ts";
 
 /**
@@ -51,6 +52,16 @@ describe("live check suite (offline, scripted model)", () => {
     expect(r.pass).toBe(false);
     expect(r.error).toMatch(/waited for a person[\s\S]*Which batch do you mean\?/);
     expect(Date.now() - t0).toBeLessThan(15_000);
+  }, 30_000);
+
+  it("live:why turns a failed case's saved log into a readable story", async () => {
+    const eventsDir = mkdtempSync(join(tmpdir(), "live-why-"));
+    const asks = scriptedModel([{ purpose: "route", match: /integrity check/i, reply: { inScope: true, tier: 1, goal: "x", playbookId: "payment-batch-check", successCriteria: [], assumptions: [], relevant: [], questions: [{ text: "Which batch do you mean?", blocking: true }] } }]);
+    await runCase(CASES.find((c) => c.id === "batch")!, { model: () => asks, timeoutSec: 60, idleGraceSec: 1, eventsDir });
+    const story = summarizeEvents(readFileSync(join(eventsDir, "batch.events.jsonl"), "utf8")).join("\n");
+    expect(story).toMatch(/YOU\s+Run the integrity check/);
+    expect(story).toMatch(/QUESTION\s+Which batch do you mean\? \(blocking\)/);
+    expect(story).toMatch(/TASK\s+(waiting_on_user|cancelled)/);
   }, 30_000);
 
   it("the sets are what the docs say", () => {

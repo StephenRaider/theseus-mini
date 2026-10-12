@@ -12,7 +12,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "live:check": "tsx src/run.ts",
-    "live:ping": "tsx src/ping.ts"
+    "live:ping": "tsx src/ping.ts",
+    "live:why": "tsx src/why.ts"
   },
   "dependencies": {
     "@theseus/core": "workspace:*",

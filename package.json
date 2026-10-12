@@ -20,7 +20,8 @@
     "agent": "tsx apps/server/src/agent.ts",
     "browser:install": "pnpm --filter @theseus/browser exec playwright-core install chromium",
     "live:ping": "pnpm --filter @theseus/evals live:ping",
-    "live:check": "pnpm --filter @theseus/evals live:check"
+    "live:check": "pnpm --filter @theseus/evals live:check",
+    "live:why": "pnpm --filter @theseus/evals live:why"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
