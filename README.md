@@ -83,6 +83,37 @@ What it can be asked (the employee picks the route itself):
 | Hands-on job across systems | "Find the latest invoice from Hoysala Steel, extract the amount and due date, enter it into FinDesk and tell me once it's done" | plans subgoals, then works one action at a time in mail, files and a real browser; asks before posting (operate mode) |
 | Out of scope | "Write me a poem" | politely refused |
 
+## Messy document intake (the part that takes human labour today)
+
+`workspace/Incoming/` is generated as a realistic pile: 14 files from three bidders in PDF, Word and phone-photo
+PNGs, under names like `scan0231.pdf` and `WhatsApp Image 2026-10-04 at 4.12.33 PM.png`, in sub-folders like
+`from Suresh/`, with one duplicate, one unrelated file, one PAN card that disagrees with its GSTIN, and documents
+two vendors forgot to send. Ask the employee:
+
+> The Incoming folder is a mess: scans, phone photos, PDFs and Word files that bidders sent. Sort it out following our vendor policy, tell me what is missing for each vendor, and draft a request to each vendor for what they still owe.
+
+It reads the vendor policy (filing rules are section 2.8-2.10), reads every file (pictures are read by sight with the
+model), files each under `Onboarding/<vendor>/<Document type> - <vendor>.<ext>`, sets aside the duplicate and the
+unrelated file under `Onboarding/_Review/`, writes `Onboarding/Document Checklist.xlsx` (Received/Missing + issues),
+drafts a request letter per vendor, and flags the PAN mismatch. Nothing is deleted. The eval cases `intake`,
+`intake-wide`, `intake-rehearse` and `intake-undo` check the real folders against the answer key.
+
+## Trust: undo, rehearse, batch approvals, memory
+
+- **Undo**: every change an employee makes (a file moved, a document created) is recorded with how to take it back.
+  The Changes tab has Undo per change and "Undo everything this task did".
+- **Rehearse first**: tick "Rehearse first" beside the chat box. Reads run, but nothing is changed: you get the list
+  of what it would do, then Apply or Discard.
+- **Approve several at once**: similar pending approvals are grouped with one Approve N / Reject N button.
+- **Memory**: "remember that we file bank proofs as ..." (or the Memory tab) is carried into every later task; each
+  note can be seen and forgotten.
+- **Show working**: each line of a report links to the evidence and tool calls it came from.
+
+## Evaluating without spending credits
+
+`pnpm live:check --proxy <dir>` writes every model request to a folder and waits for a reply file, so another Claude
+(here: subagents in a cloud session) can play the model. See `evals/RESULTS.md` for the latest results by task type.
+
 ## Install on Windows
 
 Build the installer on a Windows PC (Node 22+, pnpm 10):
