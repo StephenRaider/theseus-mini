@@ -8,8 +8,8 @@ prints a pass/fail report with the cost of every case, and stops at a spend cap 
 pnpm live:ping                       one tiny call: is the key set up right? (a fraction of a cent)
 pnpm live:check --list               the cases and their cost estimates
 pnpm live:check                      smoke set  (refuse · batch · operate)      about $0.35
-pnpm live:check --set standard       the whole demo (11 cases)                  about $1
-pnpm live:check --set full           + faults, rejection, the hold gate (14)    about $2
+pnpm live:check --set standard       the whole demo (12 cases)                  about $1.6
+pnpm live:check --set full           + faults, rejection, hold gate, intake variants (18)  about $5
 pnpm live:check --cases "operate,batch"   one or more cases by id (quote the list in PowerShell)
 pnpm live:check --headed --slowmo 300   watch the employee's browser work
 pnpm live:check --budget 1.5         stop starting new cases once this run has cost $1.50

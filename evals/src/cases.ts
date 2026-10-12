@@ -94,6 +94,8 @@ const unpaid = (w: World, days: number, activeOnly: boolean) => {
   return s.vendors.filter((v) => (!activeOnly || v.status === "active") && (!last.has(v.id) || Date.parse(`${last.get(v.id)}T00:00:00Z`) < cutoff)).length;
 };
 
+const SORT_REQUEST = "The Incoming folder is a mess: scans, phone photos, PDFs and Word files that bidders sent, all under random names. Sort it out following our vendor policy, tell me what is missing for each vendor, and draft a request to each vendor for what they still owe.";
+
 export const CASES: LiveCase[] = [
   {
     id: "refuse",
@@ -310,7 +312,6 @@ export const CASES: LiveCase[] = [
   ...intakeCases(),
 ];
 
-const SORT_REQUEST = "The Incoming folder is a mess: scans, phone photos, PDFs and Word files that bidders sent, all under random names. Sort it out following our vendor policy, tell me what is missing for each vendor, and draft a request to each vendor for what they still owe.";
 
 function intakeCases(): LiveCase[] {
   const prepare: LiveCase["before"] = async ({ world, notes }) => void (notes.orig = await originalHashes(world.workspaceDir));
@@ -347,7 +348,7 @@ function intakeCases(): LiveCase[] {
       before: prepare,
       after: async (c) => {
         c.notes.during = await snapshot(c.world.workspaceDir);
-        c.notes.previews = c.events.filter((e) => e.type === "effect.previewed").length;
+        c.notes.previews = c.events.flatMap((e) => (e.type === "effect.previewed" ? e.payload.summary.split("\n") : [])).length;
         await c.kernel.command({ type: "resolve_rehearsal", taskId: c.task.task.id, decision: "apply" });
         await c.kernel.settled();
         await grab(c);

@@ -21,7 +21,7 @@ describe("live check suite (offline, scripted model)", () => {
     for (const c of CASES) results.push(await runCase(c, { model: () => model, timeoutSec: 60 }));
     const failed = results.filter((r) => !r.pass);
     expect(failed.map((r) => `${r.id}: ${r.error ?? r.checks.filter((c) => !c.ok).map((c) => c.name).join("; ")}`)).toEqual([]);
-    expect(results).toHaveLength(14);
+    expect(results).toHaveLength(18);
   }, 180_000);
 
   it("a wrong outcome is reported as a failure (the checks have teeth)", async () => {
@@ -74,10 +74,10 @@ describe("live check suite (offline, scripted model)", () => {
 
   it("the sets are what the docs say", () => {
     expect(SETS.smoke.map((c) => c.id)).toEqual(["refuse", "batch", "operate"]);
-    expect(SETS.standard.length).toBe(11);
-    expect(SETS.full.length).toBe(14);
+    expect(SETS.standard.length).toBe(12);
+    expect(SETS.full.length).toBe(18);
     const est = (cs: typeof CASES) => cs.reduce((n, c) => n + c.estimateUsd, 0);
     expect(est(SETS.smoke)).toBeLessThan(0.5);
-    expect(est(SETS.full)).toBeLessThan(3);
+    expect(est(SETS.full)).toBeLessThan(6);
   });
 });

@@ -1886,7 +1886,13 @@ export class Kernel {
     const op = run.operate!;
     const plan = run.plan!;
     const facts = op.facts.map((f) => `• ${f.key.replace(/_/g, " ")}: ${f.value} (seen in ${f.source.tool} ${argsLine(f.source.args).slice(0, 70)}: “${f.quote.slice(0, 80)}”)`);
-    const changes = op.seen.filter((s) => s.ok && /approved by you|Saved|posted|created|submitted|draft/i.test(s.summary) && s.tool !== "files.read_text").map((s) => `• ${s.summary}`);
+    const fx = this.effects(run.task.id).map((e) => `• ${e.summary}`);
+    const rehearsing = this.gateway.rehearsing.has(run.task.id);
+    const changes = rehearsing
+      ? []
+      : fx.length
+        ? [...fx.slice(0, 30), ...(fx.length > 30 ? [`• …and ${fx.length - 30} more (see Changes)`] : [])]
+        : op.seen.filter((s) => s.ok && /approved by you|Saved|posted|created|submitted|draft/i.test(s.summary) && s.tool !== "files.read_text").map((s) => `• ${s.summary}`);
     const open = plan.items
       .filter((it) => !["done"].includes(itemStatus(plan, it.id)))
       .map((it) => `• ${it.label}: ${itemStatus(plan, it.id).replace("_", " ")}${it.holdReason ? ` (${it.holdReason})` : ""}${plan.cells[it.id]!.work!.note ? ` — ${plan.cells[it.id]!.work!.note}` : ""}`);

@@ -1,4 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
 import type { ModelRequest, ScriptRule } from "@theseus/core";
+import { INTAKE_TRUTH, INTAKE_VENDORS, SCANS, scanPath, scanTranscript } from "@theseus/kaveri";
 
 /**
  * Scripted stand-in for the model in OPERATE mode, for the brief's example:
@@ -193,3 +195,98 @@ function step(r: ModelRequest): unknown {
 
 const report = (m: Record<string, string>, doc: string, posted = false) =>
   `Entered Hoysala Steel's latest invoice ${m.invoice_number} in FinDesk as ${doc}${posted ? " and posted it to the ledger" : " (draft)"}: total Rs. ${m.invoice_total}, due on ${m.due_date}.`;
+
+/* ------------------------------------------------------------------ messy intake (the Incoming folder) */
+
+/**
+ * Offline stand-in for the "sort the Incoming folder" job. It does the real work through the real tools
+ * (listing, reading PDFs, Word files and pictures, moving, saving the checklist and letters); only the
+ * judgement of WHICH document is what is looked up from the scenario's answer key, since a script cannot
+ * read a scan. The real judgement is tested by the proxy runs, where a model reads every document.
+ */
+export function intakeRules(): ScriptRule[] {
+  const isIntake = (r: ModelRequest) => /\bIncoming\b/.test(request(r)) && !/invoice/i.test(request(r));
+  const T = INTAKE_TRUTH;
+  const ext = (p: string) => p.slice(p.lastIndexOf("."));
+  const all = [...T.filed.map((f) => f.source), ...T.duplicates.map((d) => d.source), ...T.unrelated, "Incoming/from Suresh/notes.txt"];
+  const batch1 = all.slice(0, 8);
+  const batch2 = all.slice(8);
+  const moves = [
+    ...T.filed.map((f) => `${f.source} => Onboarding/${f.vendor}/${f.type} - ${f.vendor}${ext(f.source)}`),
+    ...T.duplicates.map((d) => `${d.source} => Onboarding/_Review/Duplicates/${d.source.split("/").pop()}`),
+    ...T.unrelated.map((u) => `${u} => Onboarding/_Review/Not vendor documents/${u.split("/").pop()}`),
+  ];
+  const sheet = [
+    "Vendor | Document | Status | Issues",
+    ...T.filed.map((f) => `${f.vendor} | ${f.type} | Received | ${T.issues.some((i) => i.vendor === f.vendor) && f.type === "PAN Card" ? `PAN on the card (AAHFV2209L) does not match the PAN inside the GSTIN (AAHFV2290L): mismatch` : ""}`),
+    ...T.missing.flatMap((m) => m.types.map((t) => `${m.vendor} | ${t} | Missing | `)),
+  ].join("\n");
+  const letter = (vendor: string, types: string[]) => `Dear ${vendor},\n\nThank you for your documents. To complete your onboarding we still need: ${types.map((t) => (t === "Bank Proof" ? "a cancelled cheque or bank letter (bank proof)" : t === "Udyam Certificate" ? "your Udyam certificate" : "a signed proprietor declaration")).join(" and ")}.\n\nRegards,\nVendor Desk, Kaveri Infra`;
+  const reportText = `Sorted ${T.filed.length} vendor documents into Onboarding under each vendor, set aside ${T.duplicates.length} duplicate and ${T.unrelated.length} unrelated file. Missing: ${T.missing.map((m) => `${m.vendor}: ${m.types.join(", ")}`).join("; ")}. Flag: Vrishabha Earthmovers' PAN card shows AAHFV2209L but its GSTIN contains AAHFV2290L (mismatch). Checklist: Onboarding/Document Checklist.xlsx; request letters are in Drafts.`;
+
+  const stepIntake = (r: ModelRequest): unknown => {
+    const n = subgoal(r);
+    const tool = lastTool(r);
+    const res = lastResult(r);
+    if (n === 1) return tool !== "files.list" ? act("Looking at what is in the Incoming folder.", "files.list", { folder: "Incoming" }) : turn("14 files in mixed formats.", { subgoalDone: { proof: "Incoming/scan0231.pdf" } });
+    if (n === 2) {
+      if (tool !== "files.read_many") return act("Reading the first batch of documents (pictures are read by sight).", "files.read_many", { paths: batch1.join("\n") });
+      if (res.includes(batch1[0]!)) return act("Reading the rest.", "files.read_many", { paths: batch2.join("\n") });
+      return turn("Every document has been read.", { subgoalDone: { proof: "Sent what I could find" } });
+    }
+    if (n === 3) {
+      if (tool !== "files.move_many") return act("Filing every document under its vendor with the standard name.", "files.move_many", { moves: moves.join("\n") });
+      return turn("Filed.", { subgoalDone: { proof: `Onboarding/${INTAKE_VENDORS[0]}/GST Certificate - ${INTAKE_VENDORS[0]}.pdf` } });
+    }
+    if (n === 4) {
+      if (tool !== "files.save_xlsx") return act("Writing the document checklist.", "files.save_xlsx", { path: "Onboarding/Document Checklist.xlsx", sheet: "Checklist", rows: sheet });
+      return turn("Checklist saved.", { subgoalDone: { proof: "Onboarding/Document Checklist.xlsx" } });
+    }
+    const todo = T.missing.map((m) => m.vendor);
+    const doneCount = res.includes("Drafts/") ? 1 : 0;
+    if (tool !== "files.save_text") return act(`Drafting a request to ${todo[0]}.`, "files.save_text", { path: `Drafts/Document request - ${todo[0]}.txt`, text: letter(todo[0]!, T.missing[0]!.types) });
+    if (doneCount && !res.includes(`Document request - ${todo[1]}`) && todo[1]) return act(`Drafting a request to ${todo[1]}.`, "files.save_text", { path: `Drafts/Document request - ${todo[1]}.txt`, text: letter(todo[1], T.missing[1]!.types) });
+    return turn("Letters drafted.", { subgoalDone: { proof: "Drafts/Document request" }, report: reportText });
+  };
+
+  return [
+    {
+      purpose: "route",
+      match: isIntake,
+      reply: { inScope: true, mode: "operate", tier: 3, goal: "Sort the Incoming folder into Onboarding per the vendor policy and report what is missing", successCriteria: [], assumptions: ["Filing rules are in the Vendor Master Policy, section 2.8–2.10"], questions: [], relevant: [] },
+    },
+    {
+      purpose: "operate.plan",
+      match: isIntake,
+      reply: {
+        subgoals: [
+          { title: "See what is in Incoming", doneWhen: "the files are listed" },
+          { title: "Read every document", doneWhen: "all files were read" },
+          { title: "File each under its vendor with a standard name", doneWhen: "documents are in Onboarding/<vendor>/" },
+          { title: "Write the document checklist", doneWhen: "Onboarding/Document Checklist.xlsx exists" },
+          { title: "Draft requests for what is missing", doneWhen: "a request per vendor is in Drafts" },
+        ],
+        successCriteria: ["Every vendor document is filed under the right vendor with a standard name", "Missing documents are listed per vendor"],
+        assumptions: [],
+      },
+    },
+    { purpose: "operate.step", match: isIntake, reply: stepIntake },
+    {
+      purpose: "operate.verify",
+      match: isIntake,
+      reply: {
+        checks: [
+          { criterion: "Documents are filed under their vendors", tool: "files.list", args: { folder: "Onboarding" }, expect: [`GST Certificate - ${INTAKE_VENDORS[0]}`, "Document Checklist.xlsx"] },
+        ],
+      },
+    },
+    {
+      purpose: "vision.transcribe",
+      reply: (r: ModelRequest) => {
+        const img = r.images?.[0];
+        const hit = img && SCANS.find((s) => existsSync(scanPath(s)) && readFileSync(scanPath(s)).toString("base64") === img.base64);
+        return hit ? scanTranscript(hit) : "[illegible]";
+      },
+    },
+  ];
+}
