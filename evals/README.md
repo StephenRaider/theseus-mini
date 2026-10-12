@@ -71,7 +71,7 @@ not necessarily a bug: report it with the case id and the "employee said" text.
 >
 > **Stage B: the desktop app (no API key needed)**
 > 6. Bundle it: `pnpm --filter @theseus/desktop build`. (A packaged installer does not exist yet.)
-> 7. Automated window check: `$env:THESEUS_SMOKE="1"; $env:THESEUS_MODE="demo"; pnpm app:prod` should end with `[smoke] OK`.
+> 7. Automated window check: `$env:THESEUS_SMOKE="1"; $env:THESEUS_MODE="demo"; pnpm app:prod` should end with `[smoke] OK`. (Optional: add `$env:THESEUS_SMOKE_REQUEST="Find the latest invoice from Hoysala Steel, extract the amount and due date, enter it into FinDesk and tell me once it's done"` and `$env:THESEUS_SMOKE_SHOTS="shots"` to run the browser example and save screenshots of the three views, including the Screen tab.)
 > 8. Then start it for me to use: `pnpm app`. Tell me it opened (Employee 1, Theseus, three columns).
 >
 > **Stage C: I have added my API key (do this only after I say so)**

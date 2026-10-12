@@ -7,7 +7,9 @@
  * checked by FileSandbox (@theseus/core): granted folders only, no escapes,
  * new files only (no overwrites).
  */
-import { FileSandbox, SandboxError, type Root } from "@theseus/core";
+// Narrow import on purpose: the window process only needs the file sandbox, not the whole agent keel
+// (browser, model SDKs…), which runs in its own process (apps/server/src/host.ts).
+import { FileSandbox, SandboxError, type Root } from "@theseus/core/files";
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell, type IpcMainInvokeEvent } from "electron";
 import { fork, type ChildProcess } from "node:child_process";
 import { watch, type FSWatcher } from "node:fs";
@@ -352,13 +354,15 @@ async function smoke() {
   await new Promise((r) => setTimeout(r, 1500));
   await win!.webContents.executeJavaScript(`document.querySelector(".composer textarea")?.focus()`);
   win!.webContents.focus();
-  await win!.webContents.insertText("Run the integrity check on this week's payment batch");
+  // THESEUS_SMOKE_REQUEST lets a person (or a script) check another request, e.g. the computer-use example.
+  const request = process.env.THESEUS_SMOKE_REQUEST ?? "Run the integrity check on this week's payment batch";
+  await win!.webContents.insertText(request);
   await new Promise((r) => setTimeout(r, 200));
   win!.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
   win!.webContents.sendInputEvent({ type: "char", keyCode: "\r" });
   win!.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
   const sentAt = Date.now();
-  while (backlog.length && !backlog.some((e) => (e as { type: string }).type === "message.posted" && JSON.stringify(e).includes("integrity check"))) {
+  while (backlog.length && !backlog.some((e) => (e as { type: string }).type === "message.posted" && JSON.stringify(e).includes(request.slice(0, 24)))) {
     if (Date.now() - sentAt > 8000) return fail(`the UI did not deliver the message (toast: ${await win!.webContents.executeJavaScript(`document.querySelector(".toast")?.innerText ?? "none"`)})`);
     await new Promise((r) => setTimeout(r, 200));
   }
@@ -376,6 +380,10 @@ async function smoke() {
     await win!.webContents.executeJavaScript(`document.querySelectorAll(".chatrow")[1]?.click()`);
     await new Promise((r) => setTimeout(r, 800));
     await fs.writeFile(path.join(shots, "2-employee.png"), (await win!.webContents.capturePage()).toPNG());
+    // Computer use: the employee's live browser view.
+    await win!.webContents.executeJavaScript(`[...document.querySelectorAll('[role="tab"]')].find((b) => b.textContent?.startsWith("Screen"))?.click()`);
+    await new Promise((r) => setTimeout(r, 800));
+    await fs.writeFile(path.join(shots, "3-screen.png"), (await win!.webContents.capturePage()).toPNG());
   }
   clearTimeout(timer);
   console.log("[smoke] OK");

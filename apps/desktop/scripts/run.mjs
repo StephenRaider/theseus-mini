@@ -19,7 +19,8 @@ const web = path.resolve(desktop, "../web");
 const require = createRequire(import.meta.url);
 
 async function bundle() {
-  const common = { bundle: true, platform: "node", target: "node22", external: ["electron"], sourcemap: true, logLevel: "warning" };
+  // playwright-core cannot be bundled (it loads optional parts at runtime); the main process never needs it anyway.
+  const common = { bundle: true, platform: "node", target: "node22", external: ["electron", "playwright-core", "chromium-bidi", "chromium-bidi/*"], sourcemap: true, logLevel: "warning" };
   await Promise.all([
     // Main: ESM so modules that use import.meta.url work when bundled.
     esbuild({

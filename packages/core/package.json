@@ -5,7 +5,8 @@
   "description": "The keel: agent loop, plan store, tool router, permission gate, retries, verifier, nudges, event log, model adapter.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./files": "./src/files.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
