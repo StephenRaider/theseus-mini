@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scriptedModel } from "@theseus/server/scripted";
+import { listOption } from "../src/args.ts";
 import { CASES, SETS } from "../src/cases.ts";
 import { summarizeEvents } from "../src/why.ts";
 import { formatReport, runCase } from "../src/runner.ts";
@@ -63,6 +64,13 @@ describe("live check suite (offline, scripted model)", () => {
     expect(story).toMatch(/QUESTION\s+Which batch do you mean\? \(blocking\)/);
     expect(story).toMatch(/TASK\s+(waiting_on_user|cancelled)/);
   }, 30_000);
+
+  it("a list of cases is read however PowerShell passes it", () => {
+    expect(listOption(["--cases", "a,b,c", "--budget", "2"], "cases")).toEqual(["a", "b", "c"]);
+    expect(listOption(["--cases", "a b c"], "cases")).toEqual(["a", "b", "c"]); // what pnpm received from `--cases a,b,c`
+    expect(listOption(["--cases", "a", "b", "--retry-failed"], "cases")).toEqual(["a", "b"]);
+    expect(listOption(["--set", "full"], "cases")).toBeUndefined();
+  });
 
   it("the sets are what the docs say", () => {
     expect(SETS.smoke.map((c) => c.id)).toEqual(["refuse", "batch", "operate"]);

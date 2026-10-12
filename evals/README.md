@@ -10,7 +10,7 @@ pnpm live:check --list               the cases and their cost estimates
 pnpm live:check                      smoke set  (refuse · batch · operate)      about $0.35
 pnpm live:check --set standard       the whole demo (11 cases)                  about $1
 pnpm live:check --set full           + faults, rejection, the hold gate (14)    about $2
-pnpm live:check --cases operate      one or more cases by id (comma separated)
+pnpm live:check --cases "operate,batch"   one or more cases by id (quote the list in PowerShell)
 pnpm live:check --headed --slowmo 300   watch the employee's browser work
 pnpm live:check --budget 1.5         stop starting new cases once this run has cost $1.50
 pnpm live:check --retry-failed       run each failed case once more (flaky vs consistent)

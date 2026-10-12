@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { withTrace, type ModelAdapter } from "@theseus/core";
 import { claudeSpend, modelFromEnv, REPO_ROOT, providerFromEnv, noLiveModelReason } from "@theseus/server";
 import { scriptedModel } from "@theseus/server/scripted";
+import { listOption } from "./args.ts";
 import { CASES, SETS, type LiveCase } from "./cases.ts";
 import { formatReport, money, runCase, type CaseResult } from "./runner.ts";
 
@@ -41,7 +42,7 @@ if (!scripted && !providerFromEnv()) {
   process.exit(2);
 }
 
-const ids = opt("cases")?.split(",").map((s) => s.trim());
+const ids = listOption(args, "cases");
 const setName = (opt("set") ?? "smoke") as keyof typeof SETS;
 if (!ids && !SETS[setName]) {
   console.error(`Unknown set "${setName}". Use smoke, standard or full.`);
