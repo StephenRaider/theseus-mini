@@ -309,6 +309,9 @@ export function extractJson(text: string): unknown {
  * once more with the exact problems listed (cheap self-repair), then give up
  * with a `parse` error the caller can handle.
  */
+const dropNulls = (v: unknown): unknown =>
+  Array.isArray(v) ? v.map(dropNulls) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null).map(([k, x]) => [k, dropNulls(x)])) : v;
+
 export async function generateJson<T>(
   call: (req: ModelRequest) => Promise<ModelResponse>,
   req: Omit<ModelRequest, "jsonSchema">,
@@ -321,7 +324,13 @@ export async function generateJson<T>(
     const res = await call({ ...req, prompt, jsonSchema });
     let problem: string;
     try {
-      const parsed = schema.safeParse(extractJson(res.text));
+      const raw = extractJson(res.text);
+      let parsed = schema.safeParse(raw);
+      // Models write `"field": null` for "not applicable"; for an optional field that means absent.
+      if (!parsed.success) {
+        const retry = schema.safeParse(dropNulls(raw));
+        if (retry.success) parsed = retry;
+      }
       if (parsed.success) return parsed.data;
       problem = parsed.error.issues
         .slice(0, 8)
