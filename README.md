@@ -112,7 +112,7 @@ drafts a request letter per vendor, and flags the PAN mismatch. Nothing is delet
 ## Evaluating without spending credits
 
 `pnpm live:check --proxy <dir>` writes every model request to a folder and waits for a reply file, so another Claude
-(here: subagents in a cloud session) can play the model. See `evals/RESULTS.md` for the latest results by task type.
+(here: subagents in a cloud session) can play the model. The latest results by task type are in `evals/RESULTS.md` (kept local: this repo ignores .md files other than README).
 
 ## Install on Windows
 
