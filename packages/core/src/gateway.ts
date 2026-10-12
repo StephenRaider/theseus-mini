@@ -1,7 +1,7 @@
 import { RETRY_POLICY, type Actor, type ErrorClass, type EvidenceKind, type RiskTier, type ToolError } from "@theseus/protocol";
 import { z } from "zod";
 import type { EventLog, IdMaker } from "./log.ts";
-import { toModelSchema } from "./model.ts";
+import { toModelSchema, type ModelImage } from "./model.ts";
 
 /**
  * The tool gateway: the one door every action goes through (Framework Spec
@@ -43,9 +43,26 @@ export interface CallContext {
   onRetry?: (attempt: number, error: ToolError) => void;
 }
 
+/** How to take a change back: another (validated, logged) tool call. */
+export interface UndoSpec {
+  tool: string;
+  input: unknown;
+}
+
+export interface EffectInput {
+  /** One line a person can read: "Moved Incoming/scan0231.pdf → Onboarding/Nandi/GST Certificate.pdf". */
+  summary: string;
+  /** Absent = cannot be undone (say so in the UI). */
+  undo?: UndoSpec;
+}
+
 export interface ToolRunContext extends CallContext {
   /** Record evidence; returns its id. */
   evidence(e: EvidenceInput): string;
+  /** Record a change this call made to the outside world, with how to undo it. */
+  effect(e: EffectInput): void;
+  /** Read the text off pictures (scans, photos of documents) with the model. Absent when no model is attached. */
+  vision?(images: ModelImage[], instruction: string): Promise<string>;
 }
 
 export interface Tool<I = any, O = any> {
@@ -126,6 +143,7 @@ export class ToolGateway {
       /** If set, only these tool names may be called (role pack manifest ∩ employee allow-list). */
       allowed?: Iterable<string>;
       sleep?: (ms: number) => Promise<void>;
+      vision?: (images: ModelImage[], instruction: string, taskId?: string) => Promise<string>;
     },
   ) {
     for (const t of deps.tools) {
@@ -246,6 +264,10 @@ export class ToolGateway {
         evidenceIds.push(id);
         return id;
       },
+      effect: (e) => {
+        log.append({ type: "effect.recorded", payload: { id: ids.next("fx"), callId, taskId: ctx.taskId, tool: name, summary: e.summary, ...(e.undo ? { undo: e.undo } : {}), at: log.now } }, meta);
+      },
+      ...(this.deps.vision ? { vision: (images: ModelImage[], instruction: string) => this.deps.vision!(images, instruction, ctx.taskId) } : {}),
     };
 
     const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));

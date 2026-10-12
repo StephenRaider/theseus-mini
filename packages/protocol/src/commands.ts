@@ -14,6 +14,8 @@ export const Command = z.discriminatedUnion("type", [
     threadId: Id,
     text: z.string().min(1),
     attachments: z.array(Attachment).default([]),
+    /** Rehearse first: reads run, but nothing is changed; the employee shows what it would do, you apply or discard. */
+    rehearse: z.boolean().default(false),
   }),
   z.object({
     type: z.literal("nudge"),
@@ -28,6 +30,14 @@ export const Command = z.discriminatedUnion("type", [
     decision: z.enum(["approved", "rejected"]),
     comment: z.string().optional(),
   }),
+  /** Approve or reject several approvals in one click. */
+  z.object({ type: z.literal("resolve_approvals"), approvalIds: z.array(Id).min(1), decision: z.enum(["approved", "rejected"]), comment: z.string().optional() }),
+  /** Take back one change, or everything a task changed (newest first). */
+  z.object({ type: z.literal("undo_effect"), effectId: Id }),
+  z.object({ type: z.literal("undo_task"), taskId: Id }),
+  z.object({ type: z.literal("resolve_rehearsal"), taskId: Id, decision: z.enum(["apply", "discard"]) }),
+  z.object({ type: z.literal("add_memory"), employeeId: Id, text: z.string().min(1) }),
+  z.object({ type: z.literal("forget_memory"), memoryId: Id }),
   z.object({
     type: z.literal("cell_action"),
     taskId: Id,

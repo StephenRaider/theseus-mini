@@ -143,6 +143,22 @@ export const EventBody = z.discriminatedUnion("type", [
       outputTokens: z.number().int().nonnegative().optional(),
     }),
   ),
+  /* ---- M5: trust ---- */
+  /** A change an employee made to the outside world; `undo` is another tool call that takes it back (absent = cannot be undone). */
+  ev(
+    "effect.recorded",
+    z.object({ id: Id, callId: Id, taskId: Id.optional(), tool: z.string(), summary: z.string(), undo: z.object({ tool: z.string(), input: z.unknown() }).optional(), at: Timestamp }),
+  ),
+  ev("effect.undone", z.object({ effectId: Id, by: Actor, ok: z.boolean(), detail: z.string() })),
+  /** Rehearsal: what the employee WOULD have changed. Nothing was touched. */
+  ev(
+    "effect.previewed",
+    z.object({ id: Id, callId: Id, taskId: Id.optional(), tool: z.string(), input: z.unknown(), summary: z.string(), at: Timestamp }),
+  ),
+  ev("rehearsal.resolved", z.object({ taskId: Id, decision: z.enum(["applied", "discarded"]), applied: z.number().int().default(0), failed: z.number().int().default(0), by: Actor })),
+  /** What an employee has learned to carry into later tasks (visible, editable, removable). */
+  ev("memory.added", z.object({ id: Id, employeeId: Id, text: z.string(), taskId: Id.optional(), at: Timestamp })),
+  ev("memory.removed", z.object({ id: Id, by: Actor })),
   ev("plank.proposed", Plank),
   ev(
     "plank.resolved",

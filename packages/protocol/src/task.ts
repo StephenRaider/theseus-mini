@@ -37,6 +37,8 @@ export const Task = z.object({
   assumptions: z.array(z.string()).optional(),
   /** If Theseus delegated this, the parent task. */
   parentTaskId: Id.optional(),
+  /** "preview": a rehearsal (nothing changed yet). "applied" / "discarded": its outcome. */
+  rehearsal: z.enum(["preview", "applied", "discarded"]).optional(),
   status: TaskStatus,
   createdAt: Timestamp,
 });
