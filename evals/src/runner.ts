@@ -32,6 +32,8 @@ export interface RunOptions {
   slowMo?: number;
   /** Give up on a case after this many seconds (live models on a free tier can be slow). */
   timeoutSec?: number;
+  /** If the employee sits waiting for a person with nothing pending to approve this long, the case fails with its question (default 20). */
+  idleGraceSec?: number;
   /** Save the full event log of a FAILED case here (one .jsonl per case) so it can be analysed afterwards. */
   eventsDir?: string;
   log?: (line: string) => void;
@@ -71,7 +73,7 @@ export async function runCase(c: LiveCase, o: RunOptions): Promise<CaseResult> {
       });
     }
     await kernel.send(employee.id, c.request);
-    await untilOver(kernel, (o.timeoutSec ?? 300) * 1000);
+    await untilOver(kernel, (o.timeoutSec ?? 300) * 1000, (o.idleGraceSec ?? 20) * 1000);
     await kernel.settled();
 
     const run = [...kernel.runs.values()].at(-1)!;
@@ -113,18 +115,34 @@ export async function runCase(c: LiveCase, o: RunOptions): Promise<CaseResult> {
  * stops, so it is raced against the clock. On timeout the task is cancelled, so a stuck run cannot
  * keep calling the model (and spending) in the background.
  */
-async function untilOver(k: Kernel, ms: number) {
+async function untilOver(k: Kernel, ms: number, graceMs: number) {
   const t0 = Date.now();
+  let idleSince = 0;
+  const cancel = () => {
+    const run = [...k.runs.values()].at(-1);
+    if (run) void k.command({ type: "task_control", taskId: run.task.id, action: "cancel" });
+  };
   for (;;) {
     const left = ms - (Date.now() - t0);
     if (left <= 0) {
       const run = [...k.runs.values()].at(-1);
-      if (run) void k.command({ type: "task_control", taskId: run.task.id, action: "cancel" });
+      cancel();
       throw new Error(`timed out after ${Math.round(ms / 1000)}s (task status: ${run?.task.status ?? "not started"}); the task was cancelled`);
     }
     await Promise.race([k.settled(), sleep(Math.min(left, 1000))]);
     const run = [...k.runs.values()].at(-1);
     if (run && ["done", "failed", "cancelled"].includes(run.task.status)) return;
+    // Waiting for a person with nothing to approve (approvals are decided automatically here): it asked a question
+    // instead of acting. Say so after a short grace period rather than waiting out the whole time limit.
+    const emp = run?.employeeId;
+    const stuck = run?.task.status === "waiting_on_user" && k.pendingApprovals().length === 0;
+    if (!stuck) idleSince = 0;
+    else if (!idleSince) idleSince = Date.now();
+    else if (Date.now() - idleSince > graceMs) {
+      const asked = emp ? k.openQuestionsOf(emp).map((q) => q.text) : [];
+      cancel();
+      throw new Error(`the employee stopped and waited for a person (nothing to approve)${asked.length ? `; it asked: ${asked.map((t) => `"${t}"`).join(" / ")}` : "; no open question was recorded"}`);
+    }
     await sleep(50);
   }
 }

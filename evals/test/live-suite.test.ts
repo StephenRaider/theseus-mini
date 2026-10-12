@@ -44,6 +44,15 @@ describe("live check suite (offline, scripted model)", () => {
     expect(Date.now() - t0).toBeLessThan(8000);
   }, 30_000);
 
+  it("an employee that stops to ask a question nobody answers fails fast, with the question", async () => {
+    const asks = scriptedModel([{ purpose: "route", match: /integrity check/i, reply: { inScope: true, tier: 1, goal: "x", playbookId: "payment-batch-check", successCriteria: [], assumptions: [], relevant: [], questions: [{ text: "Which batch do you mean?", blocking: true }] } }]);
+    const t0 = Date.now();
+    const r = await runCase(CASES.find((c) => c.id === "batch")!, { model: () => asks, timeoutSec: 60, idleGraceSec: 1 });
+    expect(r.pass).toBe(false);
+    expect(r.error).toMatch(/waited for a person[\s\S]*Which batch do you mean\?/);
+    expect(Date.now() - t0).toBeLessThan(15_000);
+  }, 30_000);
+
   it("the sets are what the docs say", () => {
     expect(SETS.smoke.map((c) => c.id)).toEqual(["refuse", "batch", "operate"]);
     expect(SETS.standard.length).toBe(11);
