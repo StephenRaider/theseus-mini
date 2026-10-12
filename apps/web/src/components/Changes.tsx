@@ -63,7 +63,7 @@ export function PreviewPanel({ state, task, send }: { state: AppState; task: Tas
 
   if (outcome)
     return (
-      <div className={`preview preview--${outcome.decision}`}>
+      <div className={`rehearsal rehearsal--${outcome.decision}`}>
         <b>{outcome.decision === "applied" ? "Rehearsal applied" : "Rehearsal discarded"}</b>
         <span>
           {outcome.decision === "applied" ? `${outcome.applied} change${outcome.applied === 1 ? "" : "s"} made${outcome.failed ? `, ${outcome.failed} failed` : ""}.` : "Nothing was changed."} {clock(outcome.at)}
@@ -72,13 +72,13 @@ export function PreviewPanel({ state, task, send }: { state: AppState; task: Tas
     );
   if (task.rehearsal !== "preview") return null;
   return (
-    <div className="preview" role="region" aria-label="Preview of changes">
-      <div className="preview__head">
+    <div className="rehearsal" role="region" aria-label="Preview of changes">
+      <div className="rehearsal__head">
         <div>
           <b>Preview</b>
-          <span className="preview__sub"> Nothing has been changed yet{rows.length ? `: ${rows.length} change${rows.length === 1 ? "" : "s"} would be made` : ""}.</span>
+          <span className="rehearsal__sub"> Nothing has been changed yet{rows.length ? `: ${rows.length} change${rows.length === 1 ? "" : "s"} would be made` : ""}.</span>
         </div>
-        <div className="preview__actions">
+        <div className="rehearsal__actions">
           <button className="btn btn--primary btn--small" disabled={!rows.length} onClick={() => send({ type: "resolve_rehearsal", taskId: task.id, decision: "apply" })}>
             Apply
           </button>
@@ -89,7 +89,7 @@ export function PreviewPanel({ state, task, send }: { state: AppState; task: Tas
       </div>
       {groups.length ? (
         groups.map((g) => (
-          <details key={g.tool} className="preview__group" open={groups.length === 1}>
+          <details key={g.tool} className="rehearsal__group" open={groups.length === 1}>
             <summary>{g.headline}</summary>
             <ul>
               {g.rows.map((r) => (

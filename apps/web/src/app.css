@@ -519,7 +519,14 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
+}
+.replay__clock > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .replay__clock b {
   color: var(--text-primary);
@@ -536,9 +543,13 @@ textarea {
   animation: pulse 1.6s infinite;
 }
 .replay__controls {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 2px;
+}
+.replay__controls .btn {
+  white-space: nowrap;
 }
 .speed {
   padding: 3px 7px;
@@ -974,12 +985,18 @@ textarea {
   display: flex;
   gap: 2px;
   padding: 3px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
   border-radius: var(--r-btn);
   background: var(--tabs-bg);
 }
 .tab {
   position: relative;
-  padding: 6px 14px;
+  flex: none;
+  white-space: nowrap;
+  padding: 6px 12px;
   border-radius: var(--r-input);
   font-weight: 500;
   color: var(--text-secondary);
@@ -2000,7 +2017,7 @@ textarea {
 .effect__detail--bad {
   color: var(--incorrect-color);
 }
-.preview {
+.rehearsal {
   margin: 10px 14px;
   padding: 12px 14px;
   border-radius: var(--r-panel);
@@ -2012,31 +2029,31 @@ textarea {
   gap: 8px;
   font-size: 13px;
 }
-.preview--applied {
+.rehearsal--applied {
   border-left-color: var(--correct-color);
 }
-.preview--discarded {
+.rehearsal--discarded {
   border-left-color: var(--text-secondary);
 }
-.preview__head {
+.rehearsal__head {
   display: flex;
   justify-content: space-between;
   gap: 10px;
   align-items: center;
 }
-.preview__sub {
+.rehearsal__sub {
   color: var(--text-secondary);
 }
-.preview__actions,
+.rehearsal__actions,
 .batch__actions {
   display: flex;
   gap: 8px;
 }
-.preview__group summary {
+.rehearsal__group summary {
   cursor: pointer;
   font-weight: 500;
 }
-.preview__group ul {
+.rehearsal__group ul {
   margin: 6px 0 0;
   padding-left: 20px;
   color: var(--text-secondary);
