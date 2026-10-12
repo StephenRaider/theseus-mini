@@ -3,12 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { THESEUS_ID, type Command, type TheseusEvent } from "@theseus/protocol";
 import { AgentHost } from "@theseus/server/host";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AgentBridge, AgentSnapshot } from "../src/bridge.ts";
 import { LiveEngine } from "../src/live/engine.ts";
 import { badges, sidebarPreview } from "../src/state/selectors.ts";
 
 /** The UI's live engine wired to a real agent host through a fake bridge (what Electron does with IPC). */
+const hosts: AgentHost[] = [];
+afterEach(async () => {
+  // Each host opens local servers for the company's sites: shut them down so tests never leak ports.
+  await Promise.all(hosts.splice(0).map((h) => h.close().catch(() => undefined)));
+});
+
 async function wire() {
   const listeners = new Set<(e: TheseusEvent) => void>();
   const events: TheseusEvent[] = [];
@@ -21,6 +27,7 @@ async function wire() {
       for (const l of listeners) l(e);
     },
   });
+  hosts.push(host);
   const bridge: AgentBridge = {
     // The snapshot overlaps with events that also arrive on the stream: the engine must not double them.
     init: async (): Promise<AgentSnapshot> => ({ info: host.info, error: null, events: [...events] }),

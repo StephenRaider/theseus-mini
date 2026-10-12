@@ -2,14 +2,24 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { THESEUS_ID, type TheseusEvent } from "@theseus/protocol";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { AgentHost, managerIntent, type BrowserFrame } from "../src/host.ts";
+
+const hosts: AgentHost[] = [];
+afterEach(async () => {
+  await Promise.all(hosts.splice(0).map((h) => h.close().catch(() => undefined)));
+});
+const create = async (opts: Parameters<typeof AgentHost.create>[0]) => {
+  const h = await AgentHost.create(opts);
+  hosts.push(h);
+  return h;
+};
 
 /** The desktop app's agent host, driven exactly as the app drives it (commands in, events out). */
 describe("agent host (what the desktop app talks to)", () => {
   it("Theseus delegates to an idle employee, hires a second one when busy, and reports back", async () => {
     const events: TheseusEvent[] = [];
-    const host = await AgentHost.create({ mode: "demo", workspaceDir: await mkdtemp(join(tmpdir(), "theseus-host-")), onEvent: (e) => events.push(e), stepDelayMs: 0 });
+    const host = await create({ mode: "demo", workspaceDir: await mkdtemp(join(tmpdir(), "theseus-host-")), onEvent: (e) => events.push(e), stepDelayMs: 0 });
     expect(host.info).toMatchObject({ mode: "demo", model: "scripted" });
     expect(events.filter((e) => e.type === "employee.created").map((e) => e.type === "employee.created" && e.payload.name)).toEqual(["Employee 1", "Theseus"]);
 
@@ -37,7 +47,7 @@ describe("agent host (what the desktop app talks to)", () => {
 
   it("computer use: the app sees the employee's browser after every action", async () => {
     const frames: BrowserFrame[] = [];
-    const host = await AgentHost.create({ mode: "demo", workspaceDir: await mkdtemp(join(tmpdir(), "theseus-host-")), onEvent: () => {}, onFrame: (f) => frames.push(f), stepDelayMs: 0 });
+    const host = await create({ mode: "demo", workspaceDir: await mkdtemp(join(tmpdir(), "theseus-host-")), onEvent: () => {}, onFrame: (f) => frames.push(f), stepDelayMs: 0 });
     try {
       // The first suggestion in the app is the brief's example: find an invoice, enter it in FinDesk.
       expect(host.info.suggestions[0]).toMatch(/latest invoice .* FinDesk/);
@@ -54,7 +64,7 @@ describe("agent host (what the desktop app talks to)", () => {
 
   it("Theseus handles team requests itself: hire, who's doing what, assign to a named employee", async () => {
     const events: TheseusEvent[] = [];
-    const host = await AgentHost.create({ mode: "demo", workspaceDir: await mkdtemp(join(tmpdir(), "theseus-host-")), onEvent: (e) => events.push(e), stepDelayMs: 0 });
+    const host = await create({ mode: "demo", workspaceDir: await mkdtemp(join(tmpdir(), "theseus-host-")), onEvent: (e) => events.push(e), stepDelayMs: 0 });
     const said = () => events.filter((e) => e.type === "message.posted" && e.payload.threadId === THESEUS_ID && e.payload.from === "theseus").map((e) => (e.type === "message.posted" ? e.payload.text : ""));
     await host.command({ type: "send_message", threadId: THESEUS_ID, text: "can you create 3 more employees for me please", attachments: [] });
     expect([...host.kernel.employees.values()].map((s) => s.employee.name)).toEqual(["Employee 1", "Employee 2", "Employee 3", "Employee 4"]);
