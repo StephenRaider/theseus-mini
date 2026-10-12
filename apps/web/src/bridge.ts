@@ -39,6 +39,9 @@ export interface AgentInfo {
   workspaceDir: string;
   today: string;
   suggestions: string[];
+  /** Employee type running (role pack id and display name). */
+  pack?: string;
+  packName?: string;
 }
 
 export interface AgentSnapshot {

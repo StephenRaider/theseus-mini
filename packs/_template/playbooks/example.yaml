@@ -1,0 +1,25 @@
+# A playbook is a procedure the employee knows by heart: items (rows) × steps (columns).
+id: example-procedure
+version: 1
+title: An example procedure
+when_to_use: >
+  Describe the kind of request that should pick this playbook (the router reads this).
+item:
+  kind: record
+  plural: records
+  discover: Find the records to work on (for example, one per file in the Inbox folder).
+success_criteria:
+  - What must be true when the whole job is finished.
+steps:
+  - id: read
+    title: Read
+    goal: Read the record and capture the values the next steps need.
+    tools: [files.list, files.read_text]
+    on_fail: needs_you
+  - id: check
+    title: Check
+    goal: Check the values against the rule.
+    tools: [files.read_text]
+    checks: [example_check]
+    needs: [read]
+    on_fail: needs_you

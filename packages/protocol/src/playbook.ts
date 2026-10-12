@@ -87,6 +87,25 @@ export const RolePackManifest = z.object({
       }),
     )
     .default([]),
+  /**
+   * Who this employee is, in the pack's own words. The keel never hard-codes a
+   * role: everything Theseus or the employee says about "what I do" comes from
+   * here, so a new pack changes the voice, the examples and the sign-off.
+   */
+  persona: z
+    .object({
+      /** The desk / team this employee belongs to, e.g. "vendor desk". Used in "Tell me what you need from the ___". */
+      desk: z.string().default("team"),
+      /** The systems and data the employee works with, as one phrase, for "what can you do?". */
+      systems: z.string().default("the company's systems and files"),
+      /** One-click example requests in the app (first is the headline demo). */
+      examples: z.array(z.string()).default([]),
+      /** Sign-off on letters and documents, e.g. "Vendor Desk". */
+      signoff: z.string().default("The team"),
+      /** Example names a user might mention mid-work ("hold Malnad"), for the "how I work" blurb. */
+      steerExample: z.string().default("hold X"),
+    })
+    .default({ desk: "team", systems: "the company's systems and files", examples: [], signoff: "The team", steerExample: "hold X" }),
   /** Web apps the employee may open in its browser (keys of the company's sites). */
   apps: z.array(z.object({ key: z.string(), label: z.string(), note: z.string().optional() })).default([]),
 });

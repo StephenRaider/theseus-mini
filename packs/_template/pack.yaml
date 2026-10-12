@@ -1,0 +1,40 @@
+# TEMPLATE: copy this folder to packs/<your-role>/ to create a new type of employee.
+# Theseus (the platform) stays the same; this file + playbooks + a few tools define the role.
+# See packs/README.md for the full walkthrough.
+id: your-role                  # lowercase, hyphens; this is the pack id you register
+name: Your Role Title          # shown in the app, e.g. "Accounts Receivable Specialist"
+version: 1
+company: Your Company (fictional)
+
+# Who this employee is. The platform reads this instead of hard-coding a role.
+persona:
+  desk: your desk              # "Tell me what you need from the <desk>"
+  systems: "the inbox, the ledger and files"   # what "what can you do?" lists
+  signoff: Your Desk           # sign-off on letters it drafts
+  steerExample: hold X         # example of a mid-work instruction
+  examples:                    # one-click example requests in the app
+    - "An example request for this role"
+
+# Every tool a playbook step may use, with its risk tier:
+#   read = automatic · write = automatic + logged · irreversible = always asks you first
+tools:
+  - { name: files.list, risk: read, description: "List files in the workspace" }
+  - { name: files.read_text, risk: read, description: "Read a workspace file as text (PDF, Excel, Word, CSV)" }
+  - { name: files.search, risk: read, description: "Search workspace file names and contents" }
+  - { name: files.save_text, risk: write, description: "Save a new text file in the workspace (never overwrites)" }
+
+# What this role does and refuses. Requests outside it are politely declined.
+scope:
+  does:
+    - "the one or two jobs this employee owns"
+  does_not:
+    - "anything that spends money or can't be undone without a human"
+
+# Named checks a playbook step can require. deterministic = code decides; judged = the model decides from evidence.
+checks:
+  - { id: example_check, kind: deterministic, description: "What this check proves, in one line" }
+
+# Web apps the employee may open in its browser (computer use), and how risky their buttons are.
+# Delete these two blocks if the role needs no browser.
+apps: []
+ui_risks: []

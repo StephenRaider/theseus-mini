@@ -35,6 +35,9 @@ export interface HostInfo {
   today: string;
   /** Example requests the UI can offer as one-click suggestions. */
   suggestions: string[];
+  /** The employee type running (role pack id and display name). */
+  pack: string;
+  packName: string;
 }
 
 /** What the employee's browser showed after an action (live view in the app). */
@@ -47,6 +50,7 @@ export interface BrowserFrame {
   ts: string;
 }
 
+/** Fallback examples when a pack doesn't define its own (persona.examples). */
 export const SUGGESTIONS = [
   "Find the latest invoice from Hoysala Steel, extract the amount and due date, enter it into FinDesk and tell me once it's done",
   "Run the integrity check on this week's payment batch",
@@ -110,7 +114,9 @@ export class AgentHost {
       ...(note ? { note } : {}),
       workspaceDir: world.workspaceDir,
       today: world.today,
-      suggestions: SUGGESTIONS,
+      suggestions: kernel.pack.manifest.persona.examples.length ? kernel.pack.manifest.persona.examples : SUGGESTIONS,
+      pack: kernel.pack.manifest.id,
+      packName: kernel.pack.manifest.name,
     };
     const host = new AgentHost(kernel, info, close);
 
@@ -135,7 +141,7 @@ export class AgentHost {
     k.postMessage(
       THESEUS_ID,
       "theseus",
-      `Hi, I'm Theseus. Tell me what you need from the vendor desk and I'll hand it to an employee. You can also message an employee directly, even while they work. ${how}`,
+      `Hi, I'm Theseus. Tell me what you need from the ${this.kernel.pack.manifest.persona.desk} and I'll hand it to an employee. You can also message an employee directly, even while they work. ${how}`,
     );
   }
 
@@ -177,7 +183,7 @@ export class AgentHost {
     if (intent.kind === "team") return say(this.teamStatus());
     if (intent.kind === "about") {
       return say(
-        `I'm the manager. I hand your requests to the employees (whoever is free; I hire one if everyone's busy), keep track of who's doing what, and tell you when work finishes. Ask me things like "hire 2 more employees", "who's working on what?", or "give Employee 2 the GSTIN check". Every employee is a ${k.pack.manifest.name}, so the work itself is vendor and payment integrity.`,
+        `I'm the manager. I hand your requests to the employees (whoever is free; I hire one if everyone's busy), keep track of who's doing what, and tell you when work finishes. Ask me things like "hire 2 more employees", "who's working on what?", or "give Employee 2 the GSTIN check". Every employee is a ${k.pack.manifest.name}.`,
       );
     }
     let st: (typeof k.employees extends Map<string, infer V> ? V : never) | undefined;

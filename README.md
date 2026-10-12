@@ -1,8 +1,10 @@
 # Theseus Mini
 
-A harness for **AI employees** that take a goal, plan, use real tools, recover from failures, verify the outcome and report with evidence, while a human supervises through a three-column interface.
+**A platform for setting up AI employees.** Theseus is the manager you talk to; employees are *types* you plug in. Every employee takes a goal, plans, uses real tools (a mailbox, files, a real browser, APIs), recovers from failures, verifies the outcome and reports with evidence, while a human supervises through a three-column desktop app and approves anything irreversible.
 
-The first employee is a **Vendor & Contractor Integrity Specialist** at *Kaveri Infra Pvt Ltd* (fictional). Its job is to make sure the company only pays the right party, the right amount, into the right account.
+What makes it a platform and not one program: a fixed **keel** (planning, tool gateway with risk tiers and approvals, computer use, verification, the app) and swappable **role packs** that define a job (its tools, playbooks, checks, scope and voice). Adding an employee type is writing a pack, not changing the platform; see [packs/README.md](packs/README.md) and `packs/_template`. A test runs a completely different employee (a library clerk) on the unchanged keel to keep that claim honest.
+
+The first employee type is a **Vendor & Contractor Integrity Specialist** at *Kaveri Infra Pvt Ltd* (fictional). Its job is to make sure the company only pays the right party, the right amount, into the right account. It was chosen because the work is concrete, high-stakes and checkable, which is what an autonomous worker has to be trusted with.
 
 > Status: **M3c, computer use.** Employees now operate the company's web apps in a real browser (Chromium via Playwright): they open pages, read them, fill and submit forms, recover when a session expires or a page errors, ask before anything irreversible, and an independent verifier re-reads the result fresh. The brief's own example ("find the latest invoice from X, extract the amount and due date, enter it into our internal system, tell me when done") runs end to end against **FinDesk**, a legacy AP system with no API. See [Computer use](#computer-use-operate-mode).
 >
@@ -101,6 +103,7 @@ What it can be asked (the employee picks the route itself):
 
 ## Key ideas (short)
 
+- **Platform, not product.** Theseus is the platform and the manager; an employee type is a role pack, registered in one line (`apps/server/src/packs.ts`, pick one with `THESEUS_PACK=<id>`). The pack's `persona` supplies everything the employee says about itself, so the keel never hard-codes a role. Planned beyond this prototype: employees you define from the app (describe a job, pick tools and apps, set what needs approval) instead of writing code.
 - **Keel vs planks.** `core` knows nothing about vendors. Everything domain-specific lives in a role pack (playbooks, tools, checks) that can be versioned, and changed by the employee through a proposal → eval → human approval flow.
 - **The plan is shared state.** The agent and the user edit the same plan, only through patches; every patch is an event. A stuck item is parked (`needs_you`) and the rest keep going.
 - **Risk tiers.** `read` and `write` run automatically (logged, reversible); `irreversible` actions (activate vendor, change bank, release payment) always pause for approval.

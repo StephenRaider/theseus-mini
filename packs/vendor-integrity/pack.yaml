@@ -67,6 +67,20 @@ tools:
   - { name: browser.upload, risk: read, description: "Attach a workspace file to a form" }
   - { name: browser.back, risk: read, description: "Go back a page" }
 
+# Who this employee is. The keel reads this instead of hard-coding a role.
+persona:
+  desk: vendor desk
+  systems: "inbox, eProcure, ERP, GST and Udyam lookups, bank checks, FinDesk, files"
+  signoff: Vendor Desk
+  steerExample: hold Malnad
+  examples:
+    - "Find the latest invoice from Hoysala Steel, extract the amount and due date, enter it into FinDesk and tell me once it's done"
+    - "Run the integrity check on this week's payment batch"
+    - "Empanel the three bidders who qualified on T-2026-14"
+    - "Only check the GSTINs of the T-14 bidders"
+    - "Confirm the EMD guarantees of the T-2026-14 bidders with the banks"
+    - "Which vendors haven't been paid in six months?"
+
 # Web apps the employee can open in its browser. FinDesk has no API: forms only.
 apps:
   - { key: ap, label: "Kaveri FinDesk (AP invoice register)", note: "Legacy: web forms only, no API. Enter supplier invoices here (saved as drafts), then post them to the ledger." }

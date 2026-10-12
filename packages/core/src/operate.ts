@@ -69,7 +69,7 @@ export const OperateVerify = z.object({
     .array(
       z.object({
         criterion: z.string(),
-        tool: z.string().describe("A READ tool that shows the outcome fresh (e.g. browser.open of the record's page, mail.read, vendor.get)"),
+        tool: z.string().describe("A READ tool that shows the outcome fresh (e.g. browser.open of the record's page, or a lookup tool that returns it)"),
         args: z.record(z.string(), z.string()),
         expect: z.array(z.string()).min(1).describe("Exact values that must appear in what the tool returns (copy them from MEMORY)"),
       }),
@@ -201,7 +201,7 @@ export function operatePlanPrompt(args: { request: string; goal: string; index: 
     "",
     "You will do this job yourself, by hand, in the company's systems (web apps, mailbox, files), one action at a time.",
     "First write a short plan: 2–6 SUBGOALS in order, each something you can see is finished. Don't plan clicks; plan outcomes.",
-    "Prefer the dedicated tools (mail.*, files.*, vendor.*) when they exist; use the browser for systems that have no tool (like FinDesk).",
+    "Prefer the dedicated tools when they exist (mail, files, lookups); use the browser for systems that have no tool.",
     "Anything that can't be undone (posting, sending, releasing) needs the user's approval: plan it as its own subgoal, and ONLY if the request asks for it.",
     "",
     "WHAT EXISTS (apps, emails, files):",
@@ -249,7 +249,7 @@ export function operateTurnPrompt(args: {
     "- If something failed, read the error and fix the cause; don't repeat the same action unchanged.",
     "- remember: every fact needs an exact quote from a result you were shown. Remember the values the user asked for.",
     "- When this subgoal is visibly done, set subgoalDone with the proof text (and remember anything you need later). No action needed in that turn.",
-    "- If the system refuses for a business reason (duplicate, inactive vendor), don't force it: set cannot.",
+    "- If the system refuses for a business reason (a duplicate, an inactive record), don't force it: set cannot.",
     "- If the user rejected an action, don't try it again.",
     "",
     "TOOLS:",

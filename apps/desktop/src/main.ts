@@ -93,6 +93,8 @@ interface HostInfo {
   workspaceDir: string;
   today: string;
   suggestions: string[];
+  pack?: string;
+  packName?: string;
 }
 
 let host: ChildProcess | null = null;

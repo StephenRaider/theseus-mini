@@ -892,9 +892,9 @@ export class Kernel {
       "Procedures I know by heart:",
       ...pbs.map((p) => `• ${p.title}: ${p.steps.map((s) => s.title).join(" → ")}`),
       "",
-      `For related jobs no procedure covers, I put a plan together from my ${tools.length} tools (inbox, eProcure, ERP, GST and Udyam lookups, bank checks, files) and try it on a few items before running it.`,
+      `For related jobs no procedure covers, I put a plan together from my ${tools.length} tools (${m.persona.systems}) and try it on a few items before running it.`,
       "",
-      "How I work: I look around first (inbox, tenders, payment batches, files), tell you how I'll handle it and what I assumed, then go item by item. Anything that can't be undone, like activating a vendor or sending an email, waits for your OK. You can message me while I work (\"hold Malnad\", \"how far are you?\") and I keep going. At the end I re-check the results on a fresh read and report.",
+      `How I work: I look around first, tell you how I'll handle it and what I assumed, then go item by item. Anything that can't be undone, like sending an email or posting a record, waits for your OK. You can message me while I work ("${m.persona.steerExample}", "how far are you?") and I keep going. At the end I re-check the results on a fresh read and report.`,
       "",
       `What I don't do: ${m.scope.does_not.join("; ")}.`,
     ];
@@ -939,7 +939,7 @@ export class Kernel {
       doc = await this.json(
         "draft",
         this.system(run),
-        draftPrompt({ request: run.task.request, document: ask.document, today: this.pack.today(), sender: `Vendor Desk, ${(this.pack.manifest.company ?? "the company").replace(/\s*\(fictional\)/i, "")}`, facts }),
+        draftPrompt({ request: run.task.request, document: ask.document, today: this.pack.today(), signoff: this.pack.manifest.persona.signoff, sender: `${this.pack.manifest.persona.signoff}, ${(this.pack.manifest.company ?? "the company").replace(/\s*\(fictional\)/i, "")}`, facts }),
         DraftDoc,
         run.task.id,
       );
@@ -1895,7 +1895,7 @@ export class Kernel {
       for (const it of held) run.queue.push({ patch: { op: "release_item", itemId: it.id }, actor });
       run.wake();
       return held.length
-        ? `Released ${names(held)} in my plan; they'll be checked like the others. (Any hold already placed in the ERP stays until a person lifts it there.)`
+        ? `Released ${names(held)} in my plan; they'll be checked like the others. (Any hold already placed in the source system stays until a person lifts it there.)`
         : `${names(items)} wasn't held in my plan; I've lifted any instruction that blocked it.`;
     }
     // prioritise

@@ -22,7 +22,7 @@ export interface Triage {
 export const ModelTriage = z.object({
   kind: z.enum(TRIAGE_KINDS),
   action: z.enum(STEER_ACTIONS).optional().describe("Only for kind=steer"),
-  target: z.string().optional().describe("For steer: the exact words naming the vendor/line/bidder/item"),
+  target: z.string().optional().describe("For steer: the exact words naming the item or record"),
   answer: z.string().optional().describe("For question: a short answer using ONLY the status snapshot"),
 });
 export type ModelTriage = z.infer<typeof ModelTriage>;

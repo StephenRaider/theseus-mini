@@ -31,13 +31,13 @@ export const RouteDecision = z.object({
   mode: z
     .enum(["work", "operate", "about_me", "answer", "draft", "lookup"])
     .optional()
-    .describe("work = do something with the company's records (default) · operate = a one-off job done by hand across the systems (find, read, type into a web app, submit) · lookup = tell me about specific named vendors/tenders · about_me = a question about you, your skills or how you work · answer = a general question you can answer without any records · draft = write a letter, note, email or document"),
-  lookup: z.object({ subjects: z.array(z.string()).describe("The vendors / tenders named, EXACTLY as the user wrote them") }).optional().describe("For mode=lookup"),
+    .describe("work = do something with the company's records (default) · operate = a one-off job done by hand across the systems (find, read, type into a web app, submit) · lookup = tell me about specific named records (people, companies, projects) · about_me = a question about you, your skills or how you work · answer = a general question you can answer without any records · draft = write a letter, note, email or document"),
+  lookup: z.object({ subjects: z.array(z.string()).describe("The records named (people, companies, projects), EXACTLY as the user wrote them") }).optional().describe("For mode=lookup"),
   answer: z.string().optional().describe("For mode=answer: the answer, 2–6 sentences"),
   draft: z
     .object({
       document: z.string().describe('What to write, e.g. "formal letter confirming empanelment"'),
-      subjects: z.array(z.string()).describe("The vendors / tenders it is about, EXACTLY as the user wrote them"),
+      subjects: z.array(z.string()).describe("The records it is about, EXACTLY as the user wrote them"),
     })
     .optional()
     .describe("For mode=draft"),
@@ -110,8 +110,8 @@ export function routePrompt(args: {
     "- A question about YOU (what you can do, your skills, your workflow) → mode=about_me. Run nothing.",
     "- A general question about the job you can answer without looking at any record (\"what is TDS under 194C?\") → mode=answer with the answer. If it needs the company's records, it's work.",
     "- Write / prepare / draft a letter, note, email or document → mode=draft, with draft.subjects. NEVER run a playbook to write a document.",
-    "- Information about specific NAMED vendors or tenders (\"everything on X\", \"X's bank details\", \"is X debarred?\") → mode=lookup with lookup.subjects.",
-    "- A ONE-OFF job you would do by hand across the systems, step by step: find something (an email, an invoice, a file), read values from it, enter them into a web app (e.g. FinDesk, which has no API), submit or post a form, download or upload a file → mode=operate. Not for checks over a whole list of records (that's work).",
+    "- Information about specific NAMED records (\"everything on X\", \"X's details\", \"what's the status of X?\") → mode=lookup with lookup.subjects.",
+    "- A ONE-OFF job you would do by hand across the systems, step by step: find something (an email, a document, a file), read values from it, enter them into a web app that has no API, submit or post a form, download or upload a file → mode=operate. Not for checks over a whole list of records (that's work).",
     "- Otherwise mode=work:",
     "- A whole playbook fits → tier 1 with its playbookId.",
     "- The user wants only part of a playbook (\"only check…\", \"just the TDS\") → tier 2, playbookId and the stepIds asked for.",
@@ -213,7 +213,7 @@ export const DraftDoc = z.object({
 });
 export type DraftDoc = z.infer<typeof DraftDoc>;
 
-export function draftPrompt(args: { request: string; document: string; today: string; sender: string; facts: { label: string; kind: string; facts: Record<string, unknown> }[] }): string {
+export function draftPrompt(args: { request: string; document: string; today: string; sender: string; signoff?: string; facts: { label: string; kind: string; facts: Record<string, unknown> }[] }): string {
   return [
     `TODAY: ${args.today}`,
     `REQUEST: ${args.request}`,
@@ -226,6 +226,6 @@ export function draftPrompt(args: { request: string; document: string; today: st
     "Write it as a formal Indian business document: plain, polite, short. Address the recipient by their legal name and registered details if given.",
     "Do not invent reference numbers, amounts, dates, terms or conditions. TODAY is only the letter's date: never present it as when something happened or takes effect unless FACTS say so. If something normal for such a letter is missing (e.g. a reference number or an effective date), leave a clear placeholder like [Ref. No.] or [Effective date].",
     "Never include bank account numbers, PAN or other sensitive data unless the request asks for them.",
-    "Sign off from the Vendor Desk; leave the signatory as [Name, Designation].",
+    `Sign off from the ${args.signoff ?? "team"}; leave the signatory as [Name, Designation].`,
   ].join("\n");
 }

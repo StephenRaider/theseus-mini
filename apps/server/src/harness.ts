@@ -2,12 +2,12 @@ import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { BrowserPool, type BrowserPoolOptions } from "@theseus/browser";
 import { EventLog, GeminiAdapter, Kernel, RateLimiter, ScriptedModel, withCache, withRateLimit, withTrace, type ModelAdapter } from "@theseus/core";
-import { createVendorIntegrityRuntime } from "@theseus/pack-vendor-integrity/runtime";
+import { loadPack, packId } from "./packs.ts";
 import type { World } from "./world.ts";
 
 /**
- * Wires one harness: kernel (keel) + vendor-integrity runtime (planks) + a
- * model + a world. The same function serves the CLI, the tests and (M5) the
+ * Wires one harness: kernel (keel) + a role pack (the employee type, chosen by
+ * id from the registry in packs.ts) + a model + a world. The same function serves the CLI, the tests and (M5) the
  * desktop app.
  */
 export interface HarnessOptions {
@@ -18,6 +18,8 @@ export interface HarnessOptions {
   sleep?: (ms: number) => Promise<void>;
   employeeName?: string;
   stepDelayMs?: number;
+  /** Which employee type to run (a role pack id; default: THESEUS_PACK or "vendor-integrity"). */
+  pack?: string;
   /**
    * Computer use: give the employees a real browser (Chromium via Playwright)
    * limited to the world's sites. Needs a world whose sites listen on ports.
@@ -32,10 +34,9 @@ export async function createHarness(opts: HarnessOptions) {
     if (!opts.world.browsable) throw new Error("Computer use needs a world a browser can reach: inProcessWorld({ listen: true }) or the live world");
     pool = new BrowserPool({ ...(typeof opts.browser === "object" ? opts.browser : {}), allowOrigins: Object.values(opts.world.urls) });
   }
-  const runtime = await createVendorIntegrityRuntime({
-    client: { urls: opts.world.urls, actor: `agent:${employeeId}`, fetch: opts.world.fetch },
-    workspaceDir: opts.world.workspaceDir,
-    today: opts.world.today,
+  const runtime = await loadPack(packId(opts.pack), {
+    world: opts.world,
+    employeeId,
     ...(pool ? { browser: { pool, urls: opts.world.urls } } : {}),
   });
   const kernel = new Kernel({
