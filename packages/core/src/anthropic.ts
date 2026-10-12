@@ -172,7 +172,7 @@ export class AnthropicAdapter implements ModelAdapter {
   constructor(private readonly opts: AnthropicOptions) {
     const key = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
     if (!opts.client && !key?.trim()) throw new ModelError("auth", "ANTHROPIC_API_KEY is missing. Put it in the .env file at the project root.");
-    this.client = opts.client ?? (new Anthropic({ apiKey: key!, maxRetries: 3 }) as unknown as AnthropicLike);
+    this.client = opts.client ?? (new Anthropic({ apiKey: key!, maxRetries: 3, timeout: 120_000 }) as unknown as AnthropicLike);
     this.model = opts.model ?? "claude-sonnet-5-5";
     this.small = opts.smallModel ?? "claude-haiku-5-5";
     this.fallback = opts.fallback ?? true;

@@ -107,14 +107,24 @@ export async function runCase(c: LiveCase, o: RunOptions): Promise<CaseResult> {
   return result;
 }
 
-/** Wait until the task is done, failed or cancelled (approvals and nudges are handled by listeners). */
+/**
+ * Wait until the task is done, failed or cancelled (approvals and nudges are handled by listeners).
+ * The deadline is enforced even while the task is busy: `settled()` only resolves when the employee
+ * stops, so it is raced against the clock. On timeout the task is cancelled, so a stuck run cannot
+ * keep calling the model (and spending) in the background.
+ */
 async function untilOver(k: Kernel, ms: number) {
   const t0 = Date.now();
   for (;;) {
-    await k.settled();
+    const left = ms - (Date.now() - t0);
+    if (left <= 0) {
+      const run = [...k.runs.values()].at(-1);
+      if (run) void k.command({ type: "task_control", taskId: run.task.id, action: "cancel" });
+      throw new Error(`timed out after ${Math.round(ms / 1000)}s (task status: ${run?.task.status ?? "not started"}); the task was cancelled`);
+    }
+    await Promise.race([k.settled(), sleep(Math.min(left, 1000))]);
     const run = [...k.runs.values()].at(-1);
     if (run && ["done", "failed", "cancelled"].includes(run.task.status)) return;
-    if (Date.now() - t0 > ms) throw new Error(`timed out after ${Math.round(ms / 1000)}s (task status: ${run?.task.status ?? "not started"})`);
     await sleep(50);
   }
 }

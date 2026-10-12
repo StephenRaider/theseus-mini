@@ -17,6 +17,9 @@ pnpm live:check --retry-failed       run each failed case once more (flaky vs co
 pnpm live:check --scripted           no key: the offline stand-in model (checks the suite itself, free)
 ```
 
+Each case has a time limit of 300 s (`--timeout 600` to change it); a case that exceeds it is cancelled, reported as an
+error, and the run moves on. Each Claude call also has its own 2-minute limit. Expect about 20–25 minutes for `--set full`.
+
 A failing case never stops the run: every case is attempted, so the report shows all successes and all failures.
 Saved in `.theseus/live-check/`: the report (`.txt`, `.json`), **every prompt and reply of every model call grouped by case**
 (`.model.jsonl`), and the full event log of each failed case (a folder named like the report). These contain no API key.

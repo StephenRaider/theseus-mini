@@ -34,6 +34,16 @@ describe("live check suite (offline, scripted model)", () => {
     expect(formatReport([r], { model: "scripted" })).toMatch(/FAIL\s+batch[\s\S]*✗ Held exactly the four bad lines/);
   }, 60_000);
 
+  it("a case that hangs is cut off at the time limit (even mid-run) and its task is cancelled", async () => {
+    // A model call that never returns: the case must still end, and not keep working in the background.
+    const hung = { name: "hung", generate: () => new Promise<never>(() => {}) };
+    const t0 = Date.now();
+    const r = await runCase(CASES.find((c) => c.id === "batch")!, { model: () => hung, timeoutSec: 2 });
+    expect(r.pass).toBe(false);
+    expect(r.error).toMatch(/timed out after 2s/);
+    expect(Date.now() - t0).toBeLessThan(8000);
+  }, 30_000);
+
   it("the sets are what the docs say", () => {
     expect(SETS.smoke.map((c) => c.id)).toEqual(["refuse", "batch", "operate"]);
     expect(SETS.standard.length).toBe(11);
