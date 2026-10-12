@@ -1510,7 +1510,12 @@ export class Kernel {
           turn = await this.json("operate.step", this.system(run), p.prompt, OperateTurn, run.task.id, p.split);
         } catch (e) {
           this.blockLater(run, idx, "the model is unavailable");
-          return { status: "needs_you", note: `Model unavailable: ${modelProblem(e)}`, question: { key: `model${op.turns}`, text: `I can't think right now (${modelProblem(e)}). Reply "go on" when it's back and I'll continue "${title}".` } };
+          const garbled = e instanceof ModelError && e.kind === "parse";
+          return {
+            status: "needs_you",
+            note: `${garbled ? "Model reply unreadable" : "Model unavailable"}: ${modelProblem(e)}`,
+            question: { key: `model${op.turns}`, text: garbled ? `I couldn't make sense of my own next step (${modelProblem(e)}). Reply "go on" and I'll try "${title}" again.` : `I can't think right now (${modelProblem(e)}). Reply "go on" when it's back and I'll continue "${title}".` },
+          };
         }
         op.turns++;
         ctx.data.turns++;

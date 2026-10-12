@@ -186,8 +186,16 @@ export function resultText(data: unknown, max = 7000): string {
 
 /* ------------------------------------------------------------------ prompts */
 
+/** Arguments the system fills in itself: never shown to the model (it would try to fill them in). */
+const SYSTEM_ARGS = new Set(["expect"]);
 const toolLines = (tools: ToolDescription[]) =>
-  tools.map((t) => `- ${t.name} (${t.risk}): ${t.description} · args ${JSON.stringify((t.input as { properties?: Record<string, unknown> }).properties ? Object.keys((t.input as { properties: Record<string, unknown> }).properties) : [])}`).join("\n");
+  tools
+    .map((t) => {
+      const props = (t.input as { properties?: Record<string, unknown> }).properties;
+      const args = props ? Object.keys(props).filter((k) => !SYSTEM_ARGS.has(k)) : [];
+      return `- ${t.name} (${t.risk}): ${t.description} · args ${JSON.stringify(args)}`;
+    })
+    .join("\n");
 
 export function operatePlanPrompt(args: { request: string; goal: string; index: OrientIndex; tools: ToolDescription[] }): string {
   const srcs = args.index.sources
@@ -202,7 +210,7 @@ export function operatePlanPrompt(args: { request: string; goal: string; index: 
     "You will do this job yourself, by hand, in the company's systems (web apps, mailbox, files), one action at a time.",
     "First write a short plan: 2–6 SUBGOALS in order, each something you can see is finished. Don't plan clicks; plan outcomes.",
     "Prefer the dedicated tools when they exist (mail, files, lookups); use the browser for systems that have no tool.",
-    "Anything that can't be undone (posting, sending, releasing) needs the user's approval: plan it as its own subgoal, and ONLY if the request asks for it.",
+    "Anything that can't be undone (posting, sending, releasing) is planned as its own subgoal, and ONLY if the request asks for it. Do NOT plan a separate \"get approval\" subgoal: when you attempt such an action the system pauses and asks the user for approval by itself, so just plan the action (e.g. \"Post it to the ledger\").",
     "",
     "WHAT EXISTS (apps, emails, files):",
     srcs,
@@ -241,6 +249,7 @@ export function operateTurnPrompt(args: {
     "- When this subgoal is visibly done, set subgoalDone with the proof text (and remember anything you need later). No action needed in that turn.",
     "- If the system refuses for a business reason (a duplicate, an inactive record), don't force it: set cannot.",
     "- If the user rejected an action, don't try it again.",
+    "- Never ask the user for permission to do something the request already asked for. Actions that can't be undone pause for approval automatically when you attempt them: just attempt them. Use askUser only for information you are missing.",
     "",
     args.apps.length ? `APPS you can open in the browser:\n${args.apps.map((a) => `- ${a.label}: ${a.url}${a.note ? ` (${a.note})` : ""}`).join("\n")}\n` : "",
     "TOOLS:",

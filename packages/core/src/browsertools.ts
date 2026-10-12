@@ -53,10 +53,13 @@ export interface PageView {
 }
 
 const Ref = z.string().regex(/^e\d+$/, 'a ref from the page, like "e12"').describe('Element ref from the page outline, e.g. "e12"');
-const Expect = z
-  .object({ role: z.string(), name: z.string() })
-  .optional()
-  .describe("Filled in by the system: what the ref was when you saw it");
+/**
+ * `expect` is filled in by the system (what the ref was when you saw it); a model must never need to send it.
+ * It is accepted as anything and ignored unless it really is {role, name}: a model that sends text
+ * there ("button Save") must not have its click rejected.
+ */
+const Expect = z.unknown().optional();
+const ex = (v: unknown): RefInfo | undefined => (v && typeof v === "object" && typeof (v as RefInfo).role === "string" && typeof (v as RefInfo).name === "string" ? (v as RefInfo) : undefined);
 
 /** Judge one element: a pack rule if one matches, else what it does. */
 export function classifyElement(info: ElementInfo, rules: UiRiskRule[]): { risk: RiskTier; why: string } {
@@ -193,7 +196,7 @@ export function browserTools(o: BrowserToolsOptions): Tool[] {
     },
   };
 
-  const click: Tool<{ ref: string; about?: string; expect?: RefInfo }> = {
+  const click: Tool<{ ref: string; about?: string; expect?: unknown }> = {
     name: "browser.click",
     description: "Click a link or button by its ref. Saving or posting a form is a change: it is logged, screenshotted, and the irreversible ones wait for approval",
     risk: "write",
@@ -205,15 +208,15 @@ export function browserTools(o: BrowserToolsOptions): Tool[] {
     explain: explainRef,
     async pin(i, ctx) {
       const s = await session(ctx);
-      return { ...i, expect: i.expect ?? s.refs[i.ref] };
+      return { ...i, expect: ex(i.expect) ?? s.refs[i.ref] };
     },
     async run({ ref, expect }, ctx) {
       const s = await session(ctx);
-      return changing(s, ctx, ref, "click", () => s.click(ref, expect));
+      return changing(s, ctx, ref, "click", () => s.click(ref, ex(expect)));
     },
   };
 
-  const type: Tool<{ ref: string; text: string; submit?: boolean; about?: string; expect?: RefInfo }> = {
+  const type: Tool<{ ref: string; text: string; submit?: boolean; about?: string; expect?: unknown }> = {
     name: "browser.type",
     description: "Type text into a field (replaces what's there). submit=true presses Enter afterwards, which submits the form",
     risk: "read",
@@ -230,12 +233,13 @@ export function browserTools(o: BrowserToolsOptions): Tool[] {
     explain: explainRef,
     async pin(i, ctx) {
       const s = await session(ctx);
-      return { ...i, expect: i.expect ?? s.refs[i.ref] };
+      return { ...i, expect: ex(i.expect) ?? s.refs[i.ref] };
     },
     async run({ ref, text, submit, expect }, ctx) {
       const s = await session(ctx);
-      if (!submit) return view(await s.type(ref, text, { ...(expect ? { expect } : {}) }).catch(failure), ctx);
-      return changing(s, ctx, ref, "submit", () => s.type(ref, text, { submit: true, ...(expect ? { expect } : {}) }));
+      const e = ex(expect);
+      if (!submit) return view(await s.type(ref, text, { ...(e ? { expect: e } : {}) }).catch(failure), ctx);
+      return changing(s, ctx, ref, "submit", () => s.type(ref, text, { submit: true, ...(e ? { expect: e } : {}) }));
     },
   };
 
@@ -265,7 +269,7 @@ export function browserTools(o: BrowserToolsOptions): Tool[] {
     },
   };
 
-  const select: Tool<{ ref: string; option: string; expect?: RefInfo }> = {
+  const select: Tool<{ ref: string; option: string; expect?: unknown }> = {
     name: "browser.select",
     description: "Choose an option in a drop-down by its visible text (a unique part of it is enough)",
     risk: "read",
@@ -273,11 +277,11 @@ export function browserTools(o: BrowserToolsOptions): Tool[] {
     input: z.object({ ref: Ref, option: z.string(), expect: Expect }),
     output: "{ url, title, page }",
     async run({ ref, option, expect }, ctx) {
-      return view(await (await session(ctx)).select(ref, option, expect).catch(failure), ctx);
+      return view(await (await session(ctx)).select(ref, option, ex(expect)).catch(failure), ctx);
     },
   };
 
-  const check: Tool<{ ref: string; checked: boolean; expect?: RefInfo }> = {
+  const check: Tool<{ ref: string; checked: boolean; expect?: unknown }> = {
     name: "browser.check",
     description: "Tick or untick a checkbox / radio button",
     risk: "read",
@@ -285,11 +289,11 @@ export function browserTools(o: BrowserToolsOptions): Tool[] {
     input: z.object({ ref: Ref, checked: z.boolean(), expect: Expect }),
     output: "{ url, title, page }",
     async run({ ref, checked, expect }, ctx) {
-      return view(await (await session(ctx)).check(ref, checked, expect).catch(failure), ctx);
+      return view(await (await session(ctx)).check(ref, checked, ex(expect)).catch(failure), ctx);
     },
   };
 
-  const upload: Tool<{ ref: string; path: string; expect?: RefInfo }> = {
+  const upload: Tool<{ ref: string; path: string; expect?: unknown }> = {
     name: "browser.upload",
     description: "Attach a workspace file to a file field (it is sent when the form is submitted)",
     risk: "read",
@@ -300,7 +304,7 @@ export function browserTools(o: BrowserToolsOptions): Tool[] {
       const bytes = await o.sandbox.readBytes(o.rootId, path).catch(failure);
       const name = path.split("/").pop()!;
       const mimeType = /\.pdf$/i.test(name) ? "application/pdf" : /\.xlsx$/i.test(name) ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/octet-stream";
-      return view(await (await session(ctx)).upload(ref, { name, mimeType, buffer: bytes }, expect).catch(failure), ctx);
+      return view(await (await session(ctx)).upload(ref, { name, mimeType, buffer: bytes }, ex(expect)).catch(failure), ctx);
     },
   };
 

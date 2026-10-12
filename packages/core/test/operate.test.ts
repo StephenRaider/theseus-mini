@@ -78,3 +78,37 @@ describe("file tools: search inside documents, read Word", () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 });
+
+/* ------------------------------------------------------------------ found by the first live Claude run */
+import { extractJson } from "../src/model.ts";
+import { browserTools } from "../src/browsertools.ts";
+import { operateTurnPrompt, type OperateState } from "../src/operate.ts";
+
+describe("first live Claude run: replies and arguments real models actually produce", () => {
+  it("reads the first JSON value even with text, a second object, or braces in prose around it", () => {
+    expect(extractJson('{"a":1}')).toEqual({ a: 1 });
+    expect(extractJson('Sure!\n```json\n{"a":1}\n```\nHope that helps.')).toEqual({ a: 1 });
+    expect(extractJson('{"a":1}\n{"a":2}')).toEqual({ a: 1 }); // the failure seen live: "Unexpected non-whitespace character after JSON"
+    expect(extractJson('{"a":1}\n\nNote: use {curly} braces for objects.')).toEqual({ a: 1 });
+    expect(extractJson('The answer is {here}: {"a":{"b":"}"},"c":[1,2]}')).toEqual({ a: { b: "}" }, c: [1, 2] }); // a brace inside a string, prose braces before
+    expect(extractJson('[{"x":1}] trailing')).toEqual([{ x: 1 }]);
+    expect(() => extractJson("no json at all")).toThrow(/not JSON/);
+  });
+
+  it("a click is not rejected when the model fills in `expect` with text (it is system-filled)", () => {
+    const click = browserTools({ pool: {} as never, sandbox: {} as never, rootId: "w", rules: [] }).find((t) => t.name === "browser.click")!;
+    expect(click.input.safeParse({ ref: "e12", expect: "button Save as draft" }).success).toBe(true);
+    expect(click.input.safeParse({ ref: "e12", expect: { role: "button", name: "Save" }, about: "x" }).success).toBe(true);
+    expect(click.input.safeParse({ ref: "12" }).success).toBe(false); // refs still must look like e12
+  });
+
+  it("the model is not shown system-filled arguments, and is told not to ask permission for what was requested", () => {
+    const tools = browserTools({ pool: {} as never, sandbox: {} as never, rootId: "w", rules: [] }).map((t) => ({ name: t.name, description: t.description, risk: t.risk, input: { properties: { ref: {}, expect: {}, about: {} } } as Record<string, unknown> }));
+    const state: OperateState = { goal: "g", plan: { subgoals: [{ title: "Post it", doneWhen: "posted" }], successCriteria: ["c"], assumptions: [] }, facts: [], seen: [], turns: 0, inbox: [], notes: [], answers: {} };
+    const { prompt } = operateTurnPrompt({ request: "r", today: "2026-10-12", state, subgoal: 0, apps: [], tools });
+    expect(prompt).toContain('browser.click (write): ');
+    expect(prompt).toContain('args ["ref","about"]');
+    expect(prompt).not.toContain('"expect"');
+    expect(prompt).toMatch(/Never ask the user for permission to do something the request already asked for/);
+  });
+});

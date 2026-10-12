@@ -252,16 +252,46 @@ export function toModelSchema(schema: z.ZodType): Record<string, unknown> {
   return clean(raw) as Record<string, unknown>;
 }
 
-/** Pull the JSON out of a reply: tolerates ```json fences and text around it. */
+/**
+ * The first complete JSON value starting at or after `from`, found by matching brackets (strings and
+ * escapes respected). Models sometimes add text after the JSON, or a second object; parsing "from the
+ * first brace to the last brace" would swallow all of it.
+ */
+function balancedJson(t: string): unknown {
+  const starts: number[] = [];
+  for (let i = 0; i < t.length && starts.length < 25; i++) if (t[i] === "{" || t[i] === "[") starts.push(i);
+  for (const start of starts) {
+    let depth = 0;
+    let inStr = false;
+    for (let i = start; i < t.length; i++) {
+      const c = t[i]!;
+      if (inStr) {
+        if (c === "\\") i++;
+        else if (c === '"') inStr = false;
+      } else if (c === '"') inStr = true;
+      else if (c === "{" || c === "[") depth++;
+      else if (c === "}" || c === "]") {
+        depth--;
+        if (depth === 0) {
+          try {
+            return JSON.parse(t.slice(start, i + 1));
+          } catch {
+            break; // not JSON (e.g. "{here}" in prose): try the next opening bracket
+          }
+        }
+      }
+    }
+  }
+  throw new ModelError("parse", "Reply was not JSON");
+}
+
+/** Pull the JSON out of a reply: tolerates ```json fences, text before and after it, and a second object. */
 export function extractJson(text: string): unknown {
   const t = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   try {
     return JSON.parse(t);
   } catch {
-    const start = t.search(/[[{]/);
-    const end = Math.max(t.lastIndexOf("}"), t.lastIndexOf("]"));
-    if (start >= 0 && end > start) return JSON.parse(t.slice(start, end + 1));
-    throw new ModelError("parse", "Reply was not JSON");
+    return balancedJson(t);
   }
 }
 
