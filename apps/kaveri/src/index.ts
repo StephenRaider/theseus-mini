@@ -11,3 +11,4 @@ export { batchToXlsx } from "./exports.ts";
 export { Kaveri, KaveriError, NO_FAULTS, type FaultConfig } from "./store.ts";
 export { BIDDERS, COMPANY, TODAY, TRAPS, initialState } from "./seed/scenario.ts";
 export { getDocument, DOCUMENT_KEYS } from "./docs/pdf.ts";
+export { generateIntake, INTAKE_TRUTH, INTAKE_VENDORS, DOC_TYPES, SCANS, scanTranscript, scanPath, type IntakeTruth, type DocType } from "./intake.ts";
