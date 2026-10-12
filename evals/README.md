@@ -13,8 +13,13 @@ pnpm live:check --set full           + faults, rejection, the hold gate (14)    
 pnpm live:check --cases operate      one or more cases by id (comma separated)
 pnpm live:check --headed --slowmo 300   watch the employee's browser work
 pnpm live:check --budget 1.5         stop starting new cases once this run has cost $1.50
+pnpm live:check --retry-failed       run each failed case once more (flaky vs consistent)
 pnpm live:check --scripted           no key: the offline stand-in model (checks the suite itself, free)
 ```
+
+A failing case never stops the run: every case is attempted, so the report shows all successes and all failures.
+Saved in `.theseus/live-check/`: the report (`.txt`, `.json`), **every prompt and reply of every model call grouped by case**
+(`.model.jsonl`), and the full event log of each failed case (a folder named like the report). These contain no API key.
 
 Estimates are deliberately conservative (measured: an operate step is ~3.7k tokens, ~2.7k of it cached
 after the first step). Reports are saved to `.theseus/live-check/<time>.txt` and `.json`.

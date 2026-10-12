@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Kernel, ModelAdapter } from "@theseus/core";
 import type { TheseusEvent } from "@theseus/protocol";
 import { createHarness } from "@theseus/server";
@@ -30,6 +32,8 @@ export interface RunOptions {
   slowMo?: number;
   /** Give up on a case after this many seconds (live models on a free tier can be slow). */
   timeoutSec?: number;
+  /** Save the full event log of a FAILED case here (one .jsonl per case) so it can be analysed afterwards. */
+  eventsDir?: string;
   log?: (line: string) => void;
 }
 
@@ -90,6 +94,14 @@ export async function runCase(c: LiveCase, o: RunOptions): Promise<CaseResult> {
     const failedCall = calls.find((m) => !m.payload.ok);
     if (failedCall && !result.error && !result.pass) result.error = `a model call failed: ${failedCall.payload.error}`;
     result.seconds = (Date.now() - t0) / 1000;
+    if (o.eventsDir && !result.pass) {
+      try {
+        mkdirSync(o.eventsDir, { recursive: true });
+        writeFileSync(join(o.eventsDir, `${c.id}.events.jsonl`), kernel.log.events.map((e) => JSON.stringify(e)).join("\n"));
+      } catch {
+        /* saving evidence must never break the report */
+      }
+    }
     await h.close().catch(() => undefined);
   }
   return result;
