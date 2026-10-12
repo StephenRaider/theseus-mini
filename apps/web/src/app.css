@@ -1871,6 +1871,83 @@ textarea {
   background: #fff;
 }
 
+.screen__action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  font-size: 13px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.screen__pulse {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-color);
+  animation: pulse 1.6s infinite;
+}
+.livestrip {
+  flex: none;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 14px 0;
+  padding: 8px;
+  text-align: left;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+.livestrip:hover,
+.livestrip:focus-visible {
+  border-color: var(--accent-color);
+  outline: none;
+}
+.livestrip__img {
+  flex: none;
+  width: 120px;
+  height: 76px;
+  object-fit: cover;
+  object-position: top left;
+  border-radius: 5px;
+  background: #fff;
+}
+.livestrip__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+}
+.livestrip__state {
+  color: var(--accent-color);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+}
+.livestrip__action {
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.livestrip__url {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ------------------------------------------------------------------ trust: working, changes, preview, batch, memory */
 
 .working,

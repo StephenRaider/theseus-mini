@@ -5,7 +5,7 @@
  * release, move to top, or nudge (G3, G4).
  */
 import { THESEUS_ID, itemStatus, summarize, type CellState, type Command, type Plan, type Task } from "@theseus/protocol";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clock, progress, taskTitle } from "../state/selectors.ts";
 import type { AppState } from "../state/store.ts";
 import { Activity } from "./Activity.tsx";
@@ -14,7 +14,8 @@ import { Changes } from "./Changes.tsx";
 import { Files } from "./Files.tsx";
 import { Memory } from "./Memory.tsx";
 import { Working } from "./Working.tsx";
-import { Screen } from "./Screen.tsx";
+import { LiveStrip, Screen } from "./Screen.tsx";
+import { latestBrowserAction, useFrame } from "../state/frames.ts";
 import { Avatar, Icon, Tag } from "./ui.tsx";
 
 type Tab = "plan" | "screen" | "working" | "changes" | "memory" | "files" | "activity";
@@ -30,6 +31,8 @@ export function Work(props: {
 }) {
   const [tab, setTab] = useState<Tab>("plan");
   const { state, employeeId } = props;
+  const picked = useRef(false);
+  const frame = useFrame(employeeId);
 
   const task = useMemo(() => {
     const emp = state.employees[employeeId];
@@ -39,12 +42,32 @@ export function Work(props: {
     return undefined;
   }, [state, employeeId]);
 
+  const running = !!task && !["done", "failed", "cancelled"].includes(task.status);
+  const action = latestBrowserAction(state.toolCalls, task?.id);
+
+  // When the employee starts using a browser, show it: switch to the Screen tab once per task, unless you chose a tab yourself.
+  const seenTask = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (task?.id !== seenTask.current) {
+      seenTask.current = task?.id;
+      picked.current = false;
+    }
+  }, [task?.id]);
+  const firstFrameTs = useRef<string | undefined>(frame?.ts);
+  useEffect(() => {
+    if (frame && frame.ts !== firstFrameTs.current && running && !picked.current && tab === "plan" && employeeId !== THESEUS_ID) setTab("screen");
+  }, [frame?.ts]); // eslint-disable-line react-hooks/exhaustive-deps
+  const choose = (t: Tab) => {
+    picked.current = true;
+    setTab(t);
+  };
+
   return (
     <section className="col col--right">
       <header className="colhead">
         <div className="tabs" role="tablist">
           {(["plan", ...(bridge()?.agent && employeeId !== THESEUS_ID ? ["screen"] : []), ...(employeeId !== THESEUS_ID ? ["working", "changes", "memory"] : []), "files", "activity"] as Tab[]).map((t) => (
-            <button key={t} role="tab" aria-selected={tab === t} className={`tab ${tab === t ? "tab--on" : ""}`} onClick={() => setTab(t)}>
+            <button key={t} role="tab" aria-selected={tab === t} className={`tab ${tab === t ? "tab--on" : ""}`} onClick={() => choose(t)}>
               {t === "plan" ? (employeeId === THESEUS_ID ? "Overview" : "Plan") : t === "screen" ? "Screen" : t === "working" ? "Working" : t === "changes" ? "Changes" : t === "memory" ? "Memory" : t === "files" ? "Files" : "Activity"}
               {t === "files" && props.freshFiles.size ? <span className="tab__dot" /> : null}
             </button>
@@ -52,6 +75,7 @@ export function Work(props: {
         </div>
       </header>
       <div className="work">
+        {tab === "plan" && employeeId !== THESEUS_ID ? <LiveStrip employeeId={employeeId} action={action} live={running} onOpen={() => choose("screen")} /> : null}
         {tab === "plan" ? (
           employeeId === THESEUS_ID ? (
             <Overview state={state} onSelect={props.onSelectEmployee} />
@@ -61,7 +85,7 @@ export function Work(props: {
             <Empty title="No plan yet" text="When this employee gets a task, its plan appears here as a grid you can steer." />
           )
         ) : tab === "screen" && employeeId !== THESEUS_ID ? (
-          <Screen employeeId={employeeId} />
+          <Screen employeeId={employeeId} action={running ? action : undefined} />
         ) : tab === "working" && employeeId !== THESEUS_ID ? (
           task ? <Working state={state} task={task} /> : <Empty title="No task yet" text="When this employee has a task, the sources behind its answer appear here." />
         ) : tab === "changes" && employeeId !== THESEUS_ID ? (

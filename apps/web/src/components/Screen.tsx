@@ -7,7 +7,7 @@
 import { useFrame } from "../state/frames.ts";
 import { Empty } from "./Work.tsx";
 
-export function Screen({ employeeId }: { employeeId: string }) {
+export function Screen({ employeeId, action }: { employeeId: string; action?: string | undefined }) {
   const frame = useFrame(employeeId);
   if (!frame)
     return <Empty title="No browser yet" text="When this employee opens one of the company's web apps (like FinDesk), its screen shows up here, live, after every click." />;
@@ -20,7 +20,29 @@ export function Screen({ employeeId }: { employeeId: string }) {
         </span>
         <span className="screen__time">{new Date(frame.ts).toLocaleTimeString()}</span>
       </div>
+      {action ? (
+        <div className="screen__action" role="status">
+          <span className="screen__pulse" aria-hidden="true" />
+          {action}
+        </div>
+      ) : null}
       <img className="screen__img" src={`data:image/jpeg;base64,${frame.jpeg}`} alt={`${frame.title}: what the employee's browser shows`} />
     </div>
+  );
+}
+
+/** A small live view above the plan: the browser is visible without leaving the plan. Click to enlarge. */
+export function LiveStrip({ employeeId, action, live, onOpen }: { employeeId: string; action?: string | undefined; live: boolean; onOpen: () => void }) {
+  const frame = useFrame(employeeId);
+  if (!frame) return null;
+  return (
+    <button type="button" className="livestrip" onClick={onOpen} title="Open the full browser view">
+      <img className="livestrip__img" src={`data:image/jpeg;base64,${frame.jpeg}`} alt="" />
+      <span className="livestrip__text">
+        <span className="livestrip__state">{live ? "Browsing now" : "Last browser view"}</span>
+        <span className="livestrip__action">{action ?? frame.title}</span>
+        <span className="livestrip__url mono">{frame.url}</span>
+      </span>
+    </button>
   );
 }
