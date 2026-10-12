@@ -15,7 +15,7 @@
  *   pnpm live:check --list                   show the cases and their cost estimates
  */
 import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { FileQueueModel, withTrace, type ModelAdapter } from "@theseus/core";
 import { claudeSpend, modelFromEnv, REPO_ROOT, providerFromEnv, noLiveModelReason } from "@theseus/server";
 import { scriptedModel } from "@theseus/server/scripted";
@@ -56,7 +56,8 @@ const budget = opt("budget") ? Number(opt("budget")) : undefined;
 
 // One model instance for the whole run, so the free-tier limiter and the spend meter are shared.
 // Every model call (full prompt and reply) is recorded, case by case, for analysing failures afterwards.
-const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+// Parallel proxy runs share this folder: the queue folder's name keeps their report files apart.
+const stamp = `${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}${opt("proxy") ? `-${basename(opt("proxy")!)}` : ""}`;
 const dir = join(REPO_ROOT, ".theseus/live-check");
 mkdirSync(dir, { recursive: true });
 const traceFile = join(dir, `${stamp}.model.jsonl`);
