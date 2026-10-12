@@ -381,10 +381,11 @@ function intakeCases(): LiveCase[] {
         const after = c.notes.snap as Snapshot;
         const orig = c.notes.orig as Map<string, string>;
         const back = [...orig].filter(([p, h]) => !(after.byHash.get(h) ?? []).includes(p)).map(([p]) => p);
-        const failing = checkIntake(c.notes.sortedSnap as Snapshot, orig, c.said.join("\n")).filter((x) => !x.ok).length;
+        const failed = checkIntake(c.notes.sortedSnap as Snapshot, orig, c.said.join("\n")).filter((x) => !x.ok);
+        const failing = failed.length;
         return [
           done(c),
-          ok("Before the undo it had really sorted the files (at most 2 checks failing)", failing <= 2, `${failing} failing`),
+          ok("Before the undo it had really sorted the files (at most 2 checks failing)", failing <= 2, failed.map((x) => `${x.name}${x.detail ? ` [${x.detail}]` : ""}`).join(" ; ")),
           ok("After Undo every file is back at its original path with its original content", back.length === 0, back.join(", ")),
           ok("After Undo nothing it created is left in Onboarding, Drafts or Outbox", !after.paths.some((p) => /^(Onboarding|Drafts|Outbox)\//.test(p))),
         ];
