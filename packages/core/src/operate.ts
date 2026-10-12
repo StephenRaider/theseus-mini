@@ -135,8 +135,9 @@ export function norm(s: string): string {
     .toLowerCase()
     .replace(/₹|\brs\.?\s*|inr\s*/g, "")
     .replace(/(\d),(?=\d)/g, "$1")
+    .replace(/["'“”‘’\\{}[\]]/g, "") // quotes, braces, brackets: a pretty-printed result still matches its compact quote
+    .replace(/\s*([:,])\s*/g, "$1 ")
     .replace(/[\s ]+/g, " ")
-    .replace(/["'“”‘’]/g, "")
     .trim();
 }
 

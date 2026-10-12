@@ -134,7 +134,7 @@ export function vendorIntegrityTools(deps: { client: KaveriClient; sandbox: File
       description: "Search the company inbox (subject, sender, body). Newest first. Bodies not included.",
       risk: "read",
       idempotent: true,
-      input: z.object({ q: z.string().optional(), folder: z.enum(["inbox", "sent", "drafts"]).optional() }),
+      input: z.object({ q: z.string().optional(), folder: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["inbox", "sent", "drafts"]).optional()) }),
       output: "{ messages: [{ id, from, fromName, subject, receivedAt, attachments: [{ name }] }] }",
       async run({ q, folder }) {
         const qs = new URLSearchParams({ ...(q ? { q } : {}), ...(folder ? { folder } : {}) });

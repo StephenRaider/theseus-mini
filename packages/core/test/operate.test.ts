@@ -21,6 +21,11 @@ describe("operate: evidence-bound memory", () => {
     expect(appearsIn("27160", "Total 427160")).toBe(false);
   });
 
+  it("a JSON quote matches however the result was laid out (compact vs pretty-printed)", () => {
+    expect(appearsIn('{"path":"Downloads/Invoice_HSF_2026_0447.pdf"}', '{\n  "path": "Downloads/Invoice_HSF_2026_0447.pdf"\n}')).toBe(true);
+    expect(appearsIn('"path": "Downloads/Other.pdf"', '{\n  "path": "Downloads/Invoice.pdf"\n}')).toBe(false);
+  });
+
   it("a fact is only remembered if its quote is really in something the agent was shown", () => {
     const s = [seen("TAX INVOICE\nInvoice No.:  HSF/2026/0447\nInvoice total:  Rs. 4,27,160.00")];
     expect(sourceOf({ value: "4,27,160.00", quote: "Invoice total:  Rs. 4,27,160.00" }, s)).toBe(s[0]);
