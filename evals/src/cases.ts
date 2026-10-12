@@ -94,7 +94,7 @@ const unpaid = (w: World, days: number, activeOnly: boolean) => {
   return s.vendors.filter((v) => (!activeOnly || v.status === "active") && (!last.has(v.id) || Date.parse(`${last.get(v.id)}T00:00:00Z`) < cutoff)).length;
 };
 
-const SORT_REQUEST = "The Incoming folder is a mess: scans, phone photos, PDFs and Word files that bidders sent, all under random names. Sort it out following our vendor policy, tell me what is missing for each vendor, and draft a request to each vendor for what they still owe.";
+const SORT_REQUEST = "The Incoming folder is a mess: scans, phone photos, PDFs and Word files that bidders sent, all under random names. Sort it out following our vendor policy, tell me what is missing from this folder for each vendor, and draft a request to each vendor for what they still owe.";
 
 export const CASES: LiveCase[] = [
   {
@@ -315,7 +315,8 @@ export const CASES: LiveCase[] = [
 
 function intakeCases(): LiveCase[] {
   const prepare: LiveCase["before"] = async ({ world, notes }) => void (notes.orig = await originalHashes(world.workspaceDir));
-  const grab = async (c: CaseCtx) => void (c.notes.snap = await snapshot(c.world.workspaceDir));
+  const mailDrafts = (c: CaseCtx) => c.world.kaveri!.state.mail.filter((m) => m.folder === "drafts").map((m) => `${m.to} ${m.subject} ${m.body}`);
+  const grab = async (c: CaseCtx) => void (c.notes.snap = await snapshot(c.world.workspaceDir, mailDrafts(c)));
   const sorted = (c: CaseCtx): Check[] => checkIntake(c.notes.snap as Snapshot, c.notes.orig, c.said.join("\n")).map((x) => ok(x.name, x.ok, x.detail));
   return [
     {
@@ -331,7 +332,7 @@ function intakeCases(): LiveCase[] {
     {
       id: "intake-wide",
       title: "Messy intake, asked in other words (generalisation)",
-      request: "my father's office dumped all the vendor paperwork in Incoming. can you file it properly in Onboarding, and list who still hasn't sent what? write to them too",
+      request: "my father's office dumped all the vendor paperwork in Incoming. can you file it properly in Onboarding, and list who still hasn't sent what (going by that folder only)? write to them too",
       sets: ["full"],
       estimateUsd: 0.6,
       before: prepare,

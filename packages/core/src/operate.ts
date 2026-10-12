@@ -161,7 +161,9 @@ export function sourceOf(fact: { value: string; quote: string }, seen: Seen[]): 
   for (let i = seen.length - 1; i >= 0; i--) {
     const s = seen[i]!;
     if (!s.ok) continue;
-    if (appearsIn(fact.quote, s.text) && (appearsIn(fact.value, fact.quote) || appearsIn(fact.value, s.text))) return s;
+    // The quote must really be there. A value with digits (amount, date, id) must be there too; a plain-words value
+    // (a rule, a name, a summary of the quote) may be a paraphrase of a quote that is.
+    if (appearsIn(fact.quote, s.text) && (!/\d/.test(fact.value) || appearsIn(fact.value, fact.quote) || appearsIn(fact.value, s.text))) return s;
   }
   return undefined;
 }
@@ -218,7 +220,7 @@ export function operatePlanPrompt(args: { request: string; goal: string; index: 
     "You will do this job yourself, by hand, in the company's systems (web apps, mailbox, files), one action at a time.",
     "First write a short plan: 2–6 SUBGOALS in order, each something you can see is finished. Don't plan clicks; plan outcomes.",
     "Prefer the dedicated tools when they exist (mail, files, lookups); use the browser for systems that have no tool.",
-    "If the company has a policy or SOP that covers this kind of job (filing rules, naming, required documents), the FIRST subgoal is to read it (search the files for \"policy\") and follow it. Use batch tools (read_many, move_many) when working through many files.",
+    "If the company has a policy or SOP that covers this kind of job (filing rules, naming, required documents), the FIRST subgoal is to read it (search the files for \"policy\"), remember the rules you must follow (quote each rule's line), and follow them. Use batch tools (read_many, move_many) when working through many files.",
     "Anything that can't be undone (posting, sending, releasing) is planned as its own subgoal, and ONLY if the request asks for it. Do NOT plan a separate \"get approval\" subgoal: when you attempt such an action the system pauses and asks the user for approval by itself, so just plan the action (e.g. \"Post it to the ledger\").",
     "",
     "WHAT EXISTS (apps, emails, files):",

@@ -41,7 +41,7 @@ async function looseText(file: string): Promise<string> {
   return b.toString("utf8").toLowerCase();
 }
 
-export async function snapshot(ws: string): Promise<Snapshot> {
+export async function snapshot(ws: string, mailDrafts: string[] = []): Promise<Snapshot> {
   const paths = await walk(ws);
   const byHash = new Map<string, string[]>();
   for (const p of paths) {
@@ -56,6 +56,7 @@ export async function snapshot(ws: string): Promise<Snapshot> {
   }
   const drafts: string[] = [];
   for (const p of paths.filter((x) => /^(drafts|outbox)\//i.test(x))) drafts.push(`${p.toLowerCase()} ${await looseText(join(ws, p)).catch(() => "")}`);
+  drafts.push(...mailDrafts.map((d) => d.toLowerCase()));
   return { byHash, paths, checklistRows, drafts };
 }
 
@@ -73,6 +74,15 @@ export interface IntakeCheck {
 }
 const ck = (name: string, ok: boolean, detail?: string): IntakeCheck => ({ name, ok, ...(detail ? { detail } : {}) });
 const lc = (s: string) => s.toLowerCase();
+const ROW_WORDS: Record<string, RegExp> = {
+  "Bank Proof": /bank proof|cheque|bank letter/,
+  "Udyam Certificate": /udyam/,
+  "Proprietor Declaration": /declaration/,
+  "GST Certificate": /gst/,
+  "PAN Card": /\bpan\b/,
+  "Bid Form": /bid form/,
+};
+const rowFor = (rows: string[], vendor: string, type: string) => rows.find((r) => r.includes(vendor.toLowerCase().split(" ")[0]!) && (r.includes(type.toLowerCase()) || ROW_WORDS[type]!.test(r)));
 const DOC_SYNONYM: Record<string, RegExp> = { "Bank Proof": /bank proof|cancel+ed cheque|bank letter/, "Udyam Certificate": /udyam/, "Proprietor Declaration": /declaration/ };
 
 /** State of the folders vs the answer key. `said` = everything the employee told you. */
@@ -116,18 +126,18 @@ export function checkIntake(s: Snapshot, orig: Map<string, string>, said: string
   const missingWrong: string[] = [];
   for (const m of T.missing)
     for (const t of m.types) {
-      const row = rows.find((r) => r.includes(lc(m.vendor)) && r.includes(lc(t)));
+      const row = rowFor(rows, m.vendor, t);
       if (!row || !/missing|not received|outstanding|pending/.test(row)) missingWrong.push(`${m.vendor}: ${t}`);
     }
   checks.push(ck("The checklist marks exactly the documents that are missing as missing", missingWrong.length === 0, `not marked missing: ${missingWrong.join(", ")}`));
   const falseMissing = T.filed.filter((f) => {
-    const row = rows.find((r) => r.includes(lc(f.vendor)) && r.includes(lc(f.type)));
+    const row = rowFor(rows, f.vendor, f.type);
     return row && /missing|not received/.test(row) && !/received|yes|✓/.test(row);
   });
   checks.push(ck("It does not claim a document is missing when it was received", falseMissing.length === 0, falseMissing.map((f) => `${f.vendor}: ${f.type}`).join(", ")));
 
   const everything = lc(`${said}\n${rows.join("\n")}`);
-  for (const i of T.issues) checks.push(ck(`It flags: ${i.about}`, /aahfv2209l/.test(everything) && /pan/.test(everything) && /(mismatch|differ|does not match|doesn't match|not match|transpos)/.test(everything)));
+  for (const i of T.issues) checks.push(ck(`It flags: ${i.about}`, /aahfv2209l/.test(everything) && /aahfv2290l/.test(everything)));
 
   for (const m of T.missing)
     for (const t of m.types) {

@@ -48,7 +48,7 @@ describe("messy intake: fixtures, answer key and the tools to clear it", () => {
     const rows: string[][] = [["Vendor", "Document", "Status", "Issues"]];
     for (const f of INTAKE_TRUTH.filed) rows.push([f.vendor, f.type, "Received", ""]);
     for (const m of INTAKE_TRUTH.missing) for (const t of m.types) rows.push([m.vendor, t, "Missing", ""]);
-    rows.push(["Vrishabha Earthmovers", "PAN Card", "Received", "PAN on card AAHFV2209L does not match the GSTIN's PAN: mismatch"]);
+    rows.push(["Vrishabha Earthmovers", "PAN Card", "Received", "PAN on card AAHFV2209L but the GSTIN contains AAHFV2290L"]);
     await g.call("files.save_xlsx", { path: "Onboarding/Document Checklist.xlsx", sheet: "Checklist", rows: rows.map((r) => r.join(" | ")).join("\n") }, { employeeId: "e", taskId: "t" });
     await g.call("files.save_text", { path: "Drafts/Nandi Roadways LLP - request.txt", text: "Dear Nandi Roadways LLP, please send a cancelled cheque (bank proof)." }, { employeeId: "e", taskId: "t" });
     await g.call("files.save_text", { path: "Drafts/Sri Lakshmi Buildcon - request.txt", text: "Dear Sri Lakshmi Buildcon, please send your Udyam certificate and a signed proprietor declaration." }, { employeeId: "e", taskId: "t" });

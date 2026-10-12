@@ -80,7 +80,7 @@ persona:
   steerExample: hold Malnad
   examples:
     - "Find the latest invoice from Hoysala Steel, extract the amount and due date, enter it into FinDesk and tell me once it's done"
-    - "The Incoming folder is a mess of scans, PDFs and Word files from bidders. Sort it out and tell me what is missing"
+    - "The Incoming folder is a mess of scans, PDFs and Word files from bidders. Sort it out and tell me what is missing from the folder"
     - "Run the integrity check on this week's payment batch"
     - "Empanel the three bidders who qualified on T-2026-14"
     - "Only check the GSTINs of the T-14 bidders"

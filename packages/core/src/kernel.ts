@@ -1688,7 +1688,7 @@ export class Kernel {
         for (const r of turn.remember ?? []) {
           const src = sourceOf(r, op.seen);
           if (!src) {
-            op.notes.push(`NOT remembered "${r.key}": the quote "${r.quote.slice(0, 80)}" isn't in anything you were shown. Copy text exactly from a result.`);
+            op.notes.push(`NOT remembered "${r.key}": either the quote "${r.quote.slice(0, 80)}" isn't in anything you were shown, or the value (${r.value.slice(0, 40)}) contains a number that isn't in it. Copy ONE line exactly from a result; numbers, dates and ids must be copied exactly.`);
             continue;
           }
           const fact: Fact = { key: r.key, value: r.value, quote: r.quote, source: { tool: src.tool, args: src.args }, turn: src.turn };
@@ -1839,8 +1839,17 @@ export class Kernel {
       const k = `${f.source.tool} ${JSON.stringify(f.source.args)}`;
       bySource.set(k, [...(bySource.get(k) ?? []), f]);
     }
+    // Files the employee itself moved are read again from where they are now.
+    const movedTo = new Map<string, string>();
+    for (const e of this.effects(run.task.id))
+      if (!e.undone && e.undo?.tool === "files.move") {
+        const u = e.undo.input as { from?: string; to?: string };
+        if (u.from && u.to) movedTo.set(u.to, u.from);
+      }
+    const relocate = (args: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(args).map(([k, v]) => [k, typeof v === "string" ? [...movedTo].reduce((t, [was, now]) => t.split(was).join(now), v) : v]));
     for (const facts of bySource.values()) {
-      const src = facts[0]!.source;
+      const src = { ...facts[0]!.source, args: relocate(facts[0]!.source.args) };
       const r = await this.gateway.call(src.tool, src.args, ctx);
       if (!r.ok) {
         results.push({ criterion: `Facts re-read from ${src.tool} ${argsLine(src.args)}`, verdict: "uncertain", detail: `couldn't re-read the source: ${r.error.message}` });
