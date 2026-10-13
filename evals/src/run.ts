@@ -20,7 +20,7 @@ import { FileQueueModel, withTrace, type ModelAdapter } from "@theseus/core";
 import { claudeSpend, modelFromEnv, REPO_ROOT, providerFromEnv, noLiveModelReason } from "@theseus/server";
 import { scriptedModel } from "@theseus/server/scripted";
 import { listOption } from "./args.ts";
-import { CASES, SETS, WIDE, type LiveCase } from "./cases.ts";
+import { CASES, FOLLOWUP, SETS, WIDE, type LiveCase } from "./cases.ts";
 import { formatReport, money, runCase, type CaseResult } from "./runner.ts";
 
 const args = process.argv.slice(2);
@@ -47,10 +47,10 @@ if (!scripted && !opt("proxy") && !providerFromEnv()) {
 const ids = listOption(args, "cases");
 const setName = (opt("set") ?? "smoke") as keyof typeof SETS;
 if (!ids && !SETS[setName]) {
-  console.error(`Unknown set "${setName}". Use smoke, standard, full or wide.`);
+  console.error(`Unknown set "${setName}". Use smoke, standard, full, wide or followup.`);
   process.exit(2);
 }
-const picked: LiveCase[] = ids ? ids.map((id) => [...CASES, ...WIDE].find((c) => c.id === id) ?? (() => { throw new Error(`Unknown case "${id}". Try --list.`); })()) : SETS[setName];
+const picked: LiveCase[] = ids ? ids.map((id) => [...CASES, ...WIDE, ...FOLLOWUP].find((c) => c.id === id) ?? (() => { throw new Error(`Unknown case "${id}". Try --list.`); })()) : SETS[setName];
 const repeat = Math.max(1, Number(opt("repeat") ?? 1));
 const budget = opt("budget") ? Number(opt("budget")) : undefined;
 

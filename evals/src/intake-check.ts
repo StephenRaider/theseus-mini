@@ -145,3 +145,10 @@ export function checkIntake(s: Snapshot, orig: Map<string, string>, said: string
     }
   return checks;
 }
+
+/** The letters the employee wrote: name and lower-cased text of every file in Drafts/. */
+export async function draftTexts(ws: string): Promise<{ name: string; text: string }[]> {
+  const out: { name: string; text: string }[] = [];
+  for (const p of (await walk(ws)).filter((x) => /^drafts\//i.test(x))) out.push({ name: p.split("/").pop()!, text: await looseText(join(ws, p)).catch(() => "") });
+  return out;
+}

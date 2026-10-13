@@ -77,10 +77,16 @@ export async function runCase(c: LiveCase, o: RunOptions): Promise<CaseResult> {
     await kernel.command({ type: "send_message", threadId: employee.id, text: c.request, attachments: [], ...(c.rehearse ? { rehearse: true } : {}) });
     await untilOver(kernel, (o.timeoutSec ?? 300) * 1000, (o.idleGraceSec ?? 20) * 1000);
     await kernel.settled();
+    // Follow-ups: the same employee, the next message, once the previous task is over.
+    for (const text of c.followups ?? []) {
+      await kernel.command({ type: "send_message", threadId: employee.id, text, attachments: [] });
+      await untilOver(kernel, (o.timeoutSec ?? 300) * 1000, (o.idleGraceSec ?? 20) * 1000);
+      await kernel.settled();
+    }
 
     const run = [...kernel.runs.values()].at(-1)!;
     const said = kernel.log.ofType("message.posted").filter((m) => m.payload.from.startsWith("employee:")).map((m) => m.payload.text);
-    const ctx: CaseCtx = { kernel, employeeId: employee.id, world, said, lastSaid: said.at(-1) ?? "", task: run, events: kernel.log.events, notes };
+    const ctx: CaseCtx = { kernel, employeeId: employee.id, world, said, lastSaid: said.at(-1) ?? "", task: run, runs: [...kernel.runs.values()], events: kernel.log.events, notes };
     await c.after?.(ctx);
     result.checks = c.check(ctx);
     result.pass = result.checks.every((x) => x.ok);

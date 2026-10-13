@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Kernel } from "@theseus/core";
 import type { TheseusEvent } from "@theseus/protocol";
-import { checkIntake, originalHashes, snapshot, type Snapshot } from "./intake-check.ts";
+import { checkIntake, draftTexts, originalHashes, snapshot, type Snapshot } from "./intake-check.ts";
 import type { World } from "@theseus/server/world";
 
 /**
@@ -27,6 +27,8 @@ export interface CaseCtx {
   /** The task the request created. */
   task: ReturnType<Kernel["runs"]["get"]> extends infer R ? NonNullable<R> : never;
   events: readonly TheseusEvent[];
+  /** Every task this employee ran in the case, oldest first (`task` is the last one). */
+  runs: NonNullable<ReturnType<Kernel["runs"]["get"]>>[];
   /** Scratch space shared by `before`, `after` and `check` (snapshots of folders, etc.). */
   notes: Record<string, any>;
 }
@@ -55,6 +57,8 @@ export interface LiveCase {
   nudge?: { text: string; when: (e: TheseusEvent) => boolean };
   /** Slow every step down so the nudge lands mid-work. */
   stepDelayMs?: number;
+  /** Further messages sent one after another, each once the previous task is over (follow-ups that refer back: "those", "the first 3"). */
+  followups?: string[];
   /** Rehearse first: the employee only previews its changes; `after` decides what happens next. */
   rehearse?: boolean;
   /** Runs before the request is sent (e.g. remember what the folders looked like). */
@@ -412,4 +416,111 @@ export const WIDE: LiveCase[] = [
   variant("operate", "operate-c", "enter the newest Hoysala Steel bill into the AP system (FinDesk), amount and due date included, and confirm"),
 ];
 
-export const SETS = { smoke: CASES.filter((c) => c.sets.includes("smoke")), standard: CASES.filter((c) => c.sets.includes("standard")), full: CASES, wide: WIDE };
+/* ------------------------------------------------------------------ follow-ups: does it remember the conversation? */
+
+const vendorName = (w: World, id: string) => w.kaveri!.state.vendors.find((v) => v.id === id)?.legalName ?? id;
+const firstWord = (n: string) => n.toLowerCase().split(/\s+/)[0]!;
+/** Names of vendors with no payment in `days` days, as the answer key sees them. */
+const unpaidNames = (w: World, days: number) => {
+  const s = w.kaveri!.state;
+  const last = new Map<string, string>();
+  for (const b of s.paidBills) if ((last.get(b.vendorId) ?? "") < b.paidOn) last.set(b.vendorId, b.paidOn);
+  const cutoff = Date.parse(`${s.today}T00:00:00Z`) - days * 86_400_000;
+  return s.vendors.filter((v) => !last.has(v.id) || Date.parse(`${last.get(v.id)}T00:00:00Z`) < cutoff).map((v) => v.legalName);
+};
+const noRework = (c: CaseCtx): Check => {
+  const second = c.runs.at(-1)!;
+  return ok("The follow-up did not run the check again (no plan, no program)", c.runs.length === 2 && !second.plan && !second.program, `runs: ${c.runs.length}, plan: ${!!second.plan}`);
+};
+const nothingSent = (c: CaseCtx): Check => ok("Nothing was emailed", !c.events.some((e) => e.type === "tool.called" && e.payload.tool === "mail.send"));
+const lettersFor = (drafts: { name: string; text: string }[], names: string[]) => names.filter((n) => drafts.some((d) => d.text.includes(firstWord(n)) || d.name.toLowerCase().includes(firstWord(n))));
+
+export const FOLLOWUP: LiveCase[] = [
+  {
+    id: "followup-dormant-letters",
+    title: "Follow-up: letters to the first 3 of the vendors it just listed",
+    request: "Which vendors haven't been paid in six months?",
+    followups: ["Write a short letter to each of the first 3 vendors on that list asking them to confirm their current bank details."],
+    sets: [],
+    estimateUsd: 0.15,
+    before: async ({ notes }) => void (notes.drafts = []),
+    after: async (c) => void (c.notes.drafts = await draftTexts(c.world.workspaceDir)),
+    check: (c) => {
+      const drafts = c.notes.drafts as { name: string; text: string }[];
+      const key = unpaidNames(c.world, 180);
+      const named = key.filter((n) => drafts.some((d) => d.text.includes(firstWord(n))));
+      return [
+        done(c),
+        noRework(c),
+        ok("Exactly 3 letters were written", drafts.length === 3, `${drafts.length} drafts: ${drafts.map((d) => d.name).join(", ")}`),
+        ok("Each letter is to a different vendor from the list it had just produced", named.length === 3, `vendors found in letters: ${named.join(", ") || "none"}`),
+        ok("The letters ask about bank details", drafts.length > 0 && drafts.every((d) => /bank/.test(d.text.toLowerCase()))),
+        nothingSent(c),
+      ];
+    },
+  },
+  {
+    id: "followup-held-letters",
+    title: "Follow-up: letters to the vendors whose lines it just held (no second check)",
+    request: "Run the integrity check on this week's payment batch",
+    followups: ["Write to each vendor whose payment you held and ask them to send corrected details."],
+    sets: [],
+    estimateUsd: 0.2,
+    after: async (c) => void (c.notes.drafts = await draftTexts(c.world.workspaceDir)),
+    check: (c) => {
+      const drafts = c.notes.drafts as { name: string; text: string }[];
+      const heldVendors = [...new Set(["PL-03", "PL-08", "PL-10", "PL-11"].map((id) => vendorName(c.world, line(c.world, id).vendorId)))];
+      const covered = lettersFor(drafts, heldVendors);
+      const held = batch(c.world).lines.filter((l) => l.status === "held").map((l) => l.id).sort();
+      return [
+        done(c),
+        noRework(c),
+        ok("The same four lines are still held (the check was not repeated or undone)", JSON.stringify(held) === JSON.stringify(["PL-03", "PL-08", "PL-10", "PL-11"]), `held: ${held.join(", ")}`),
+        ok(`Letters exist for the vendors of the held lines (${heldVendors.length} vendors)`, covered.length >= heldVendors.length - 1, `covered: ${covered.join(", ") || "none"}`),
+        ok("It did not write to vendors whose lines were fine", drafts.length <= heldVendors.length + 1, `${drafts.length} drafts`),
+        nothingSent(c),
+      ];
+    },
+  },
+  {
+    id: "followup-first-two",
+    title: "Follow-up: 'the first 2 of the ones you held' (it counts from the earlier list)",
+    request: "Run the integrity check on this week's payment batch",
+    followups: ["Draft a letter to the first 2 vendors you held payments for, asking them to confirm their bank details."],
+    sets: [],
+    estimateUsd: 0.2,
+    after: async (c) => void (c.notes.drafts = await draftTexts(c.world.workspaceDir)),
+    check: (c) => {
+      const drafts = c.notes.drafts as { name: string; text: string }[];
+      const heldVendors = [...new Set(["PL-03", "PL-08", "PL-10", "PL-11"].map((id) => vendorName(c.world, line(c.world, id).vendorId)))];
+      const covered = lettersFor(drafts, heldVendors);
+      return [
+        done(c),
+        noRework(c),
+        ok("Exactly 2 letters were written", drafts.length === 2, `${drafts.length} drafts`),
+        ok("Both are to vendors whose lines were held", covered.length === 2, `covered: ${covered.join(", ") || "none"}`),
+        nothingSent(c),
+      ];
+    },
+  },
+  {
+    id: "followup-them",
+    title: "Follow-up: 'them' means the vendor it just described",
+    request: "Tell me everything about Malnad Transport Co",
+    followups: ["Now draft a short letter to them asking to confirm their bank details."],
+    sets: [],
+    estimateUsd: 0.08,
+    after: async (c) => void (c.notes.drafts = await draftTexts(c.world.workspaceDir)),
+    check: (c) => {
+      const drafts = c.notes.drafts as { name: string; text: string }[];
+      return [
+        done(c),
+        ok("One letter was written, addressed to Malnad Transport Co", drafts.length === 1 && /malnad/.test(drafts[0]!.text), `${drafts.length} drafts`),
+        ok("It did not ask 'who do you mean'", !/who (did|do) you mean|which vendor/i.test(c.lastSaid)),
+        nothingSent(c),
+      ];
+    },
+  },
+];
+
+export const SETS = { smoke: CASES.filter((c) => c.sets.includes("smoke")), standard: CASES.filter((c) => c.sets.includes("standard")), full: CASES, wide: WIDE, followup: FOLLOWUP };
