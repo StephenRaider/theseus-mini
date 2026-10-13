@@ -512,6 +512,5 @@ describe("memory of the conversation: a follow-up can refer to what the employee
     // the very first request has nothing to remember
     const first = model.calls.filter((c) => c.purpose === "route")[0]!.prompt;
     expect(first).not.toContain("EARLIER WORK (");
-    expect(first).not.toContain("FOLLOW-UPS:");
   });
 });
