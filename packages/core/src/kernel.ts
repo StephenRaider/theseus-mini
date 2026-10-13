@@ -29,6 +29,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { ToolGateway, previewOf, type EvidenceInput, type GatewayResult, type StandingConstraint, type Tool } from "./gateway.ts";
 import { EventLog, IdMaker, type Clock } from "./log.ts";
+import { shortReply } from "./shortreply.ts";
 import { ModelError, generateJson, type ModelAdapter, type ModelRequest, type ModelResponse } from "./model.ts";
 import {
   OPERATE_LIMITS,
@@ -501,19 +502,19 @@ export class Kernel {
     return st;
   }
 
-  private post(employeeId: string, from: Actor, text: string, taskId?: string, attachments: { name: string; mime: string; ref: string }[] = []) {
+  private post(employeeId: string, from: Actor, text: string, taskId?: string, attachments: { name: string; mime: string; ref: string }[] = [], summary?: string) {
     this.emit(
       {
         type: "message.posted",
-        payload: { id: this.ids.next("msg"), threadId: employeeId, from, text, attachments, ...(taskId ? { taskId } : {}), ts: this.log.now },
+        payload: { id: this.ids.next("msg"), threadId: employeeId, from, text, ...(summary ? { summary } : {}), attachments, ...(taskId ? { taskId } : {}), ts: this.log.now },
       },
       from,
       { employeeId, ...(taskId ? { taskId } : {}) },
     );
   }
 
-  private say(run: TaskRun, text: string, attachments: { name: string; mime: string; ref: string }[] = []) {
-    this.post(run.employeeId, `employee:${run.employeeId}`, text, run.task.id, attachments);
+  private say(run: TaskRun, text: string, attachments: { name: string; mime: string; ref: string }[] = [], summary?: string) {
+    this.post(run.employeeId, `employee:${run.employeeId}`, text, run.task.id, attachments, summary);
   }
 
   private setEmployee(st: EmployeeState, changes: Partial<Employee>) {
@@ -2188,7 +2189,14 @@ export class Kernel {
     const rehearsalLine = rehearsing
       ? `\n\nREHEARSAL: I did not change anything. ${previews.length ? `Here is what I would do (${previews.length} change${previews.length === 1 ? "" : "s"}):\n${previews.slice(0, 40).map((p) => `• ${p.payload.summary}`).join("\n")}${previews.length > 40 ? `\n• …and ${previews.length - 40} more` : ""}\nApply them, or discard.` : "There was nothing to change."}`
       : "";
-    this.say(run, report + (rehearsing ? "" : verifyLine) + rehearsalLine, await this.deliverables(run));
+    const short = shortReply({
+      report,
+      verdicts: results.map((r) => ({ criterion: r.criterion, verdict: r.verdict, detail: r.detail })),
+      changes: this.effects(run.task.id).length,
+      open: plan.items.filter((it) => itemStatus(plan, it.id) !== "done").length,
+      ...(rehearsing ? { rehearsal: { previews: previews.reduce((n, p) => n + p.payload.summary.split("\n").length, 0) } } : {}),
+    });
+    this.say(run, report + (rehearsing ? "" : verifyLine) + rehearsalLine, await this.deliverables(run), short);
     this.setStatus(run, "done");
   }
 

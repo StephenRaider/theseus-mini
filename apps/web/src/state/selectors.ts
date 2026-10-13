@@ -116,7 +116,7 @@ export function sidebarPreview(s: AppState, employeeId: string, now: string): Pr
   }
   if (last) {
     const prefix = last.from === "user" ? "You: " : employeeId !== THESEUS_ID && last.from === "theseus" ? "Theseus: " : undefined;
-    return { kind: "message", text: last.text.split("\n")[0]!, prefix, hasAttachment: last.attachments.length > 0 };
+    return { kind: "message", text: (last.summary ?? last.text).split("\n")[0]!, prefix, hasAttachment: last.attachments.length > 0 };
   }
   return { kind: "empty", text: emp?.scope ?? "No messages yet" };
 }

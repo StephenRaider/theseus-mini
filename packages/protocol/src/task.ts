@@ -85,6 +85,8 @@ export const Message = z.object({
   threadId: Id,
   from: Actor,
   text: z.string(),
+  /** A short, plain version for people. When present the UI shows it, with `text` (the full report) behind "Show details". */
+  summary: z.string().optional(),
   attachments: z.array(Attachment).default([]),
   /** Optional link to a task this message is about. */
   taskId: Id.optional(),

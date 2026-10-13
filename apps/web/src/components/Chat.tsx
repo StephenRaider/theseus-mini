@@ -285,7 +285,17 @@ function Bubble({ m, threadId, nudge, grouped }: { m: Message; threadId: string;
       <div className={`bubble ${mine ? "bubble--me" : ""} ${fromTheseus ? "bubble--theseus" : ""}`}>
         {fromTheseus ? <span className="bubble__from">Theseus · assigned a task</span> : null}
         {nudge ? <Tag tone="accent">Nudge</Tag> : null}
-        {m.text && m.text !== "(attachment)" ? <div className="bubble__text">{m.text}</div> : null}
+        {m.summary ? (
+          <>
+            <div className="bubble__text">{m.summary}</div>
+            <details className="bubble__details">
+              <summary>Show details</summary>
+              <div className="bubble__text bubble__full">{m.text}</div>
+            </details>
+          </>
+        ) : m.text && m.text !== "(attachment)" ? (
+          <div className="bubble__text">{m.text}</div>
+        ) : null}
         {m.attachments.length ? (
           <div className="bubble__files">
             {m.attachments.map((a) => (

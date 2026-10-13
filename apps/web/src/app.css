@@ -677,6 +677,26 @@ textarea {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.bubble__details {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.bubble__details > summary {
+  cursor: pointer;
+  color: var(--accent-color);
+  width: fit-content;
+}
+.bubble__full {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
 .bubble__files {
   display: flex;
   flex-direction: column;

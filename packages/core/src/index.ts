@@ -18,3 +18,4 @@ export * from "./program.ts";
 export * from "./triage.ts";
 export * from "./prompts.ts";
 export * from "./kernel.ts";
+export * from "./shortreply.ts";
