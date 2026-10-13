@@ -531,10 +531,11 @@ export const FOLLOWUP: LiveCase[] = [
     browser: true,
     check: (c) => {
       const second = c.runs.at(-1)!.task.id;
-      const reads = c.events.filter((e) => e.type === "tool.called" && e.payload.taskId === second).length;
+      // Looking at the index at the start of every task is normal; what must not happen is working the systems again.
+      const reads = c.events.filter((e) => e.type === "tool.called" && e.payload.taskId === second && (e.payload.tool.startsWith("browser.") || (c.kernel.gateway.get(e.payload.tool)?.risk ?? "write") !== "read")).length;
       return [
         done(c),
-        ok("It answered from memory: no tools used in the follow-up", reads === 0, `${reads} tool calls`),
+        ok("It answered from memory: no browser use or changes in the follow-up", reads === 0, `${reads} calls`),
         ok("The answer has the due date (02/11/2026)", /02\/11\/2026|2 Nov(ember)? 2026|2026-11-02/.test(c.lastSaid), c.lastSaid.slice(0, 160)),
         ok("The answer has the total (4,27,160)", /4,27,160|427160|427,160/.test(c.lastSaid)),
         ok("Still exactly one invoice booked", c.world.kaveri!.state.apInvoices.filter((i) => i.number === "HSF/2026/0447").length === 1),

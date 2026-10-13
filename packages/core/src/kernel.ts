@@ -902,7 +902,11 @@ export class Kernel {
       return false;
     }
     if (decision.mode === "answer" && decision.answer?.trim()) {
-      this.finishWithAnswer(run, decision.goal, `${decision.answer.trim()}\n\n(That's general knowledge of the job, not something I checked in our records.)`);
+      this.finishWithAnswer(
+        run,
+        decision.goal,
+        `${decision.answer.trim()}\n\n${this.conversationContext(run) ? "(From what we did earlier in this conversation; I haven't re-checked our records.)" : "(That's general knowledge of the job, not something I checked in our records.)"}`,
+      );
       return false;
     }
     if (decision.mode === "lookup" && decision.lookup?.subjects.length && this.pack.lookup) {
