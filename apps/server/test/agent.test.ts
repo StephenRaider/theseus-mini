@@ -495,3 +495,23 @@ describe("Jyotiraditya's first live chats (what went wrong, now pinned down)", (
     expect(lastMessage(kernel)).toMatch(/today's date used in the text/);
   });
 });
+
+describe("memory of the conversation: a follow-up can refer to what the employee just produced", () => {
+  it("the next request is routed with the earlier chat and the earlier result, flagged items first", async () => {
+    const { kernel, employee, model } = await setup();
+    await run(kernel, employee.id, "Run the integrity check on this week's payment batch");
+    await run(kernel, employee.id, "Which vendors haven't been paid in six months?");
+    const second = model.calls.filter((c) => c.purpose === "route").at(-1)!.prompt;
+    expect(second).toContain("THIS CONVERSATION SO FAR");
+    expect(second).toContain("USER: Run the integrity check on this week's payment batch");
+    expect(second).toMatch(/EARLIER WORK \(task_001\): "Run the integrity check/);
+    expect(second).toMatch(/Items \(65; flagged first\):/);
+    const flagged = second.split("Items (65; flagged first):")[1]!.split("\n").filter((l) => l.startsWith("  - "));
+    expect(flagged[0]).toMatch(/\[(held|skipped|failed|needs_you)/); // the problem lines come before the clean ones
+    expect(second).toContain("FOLLOW-UPS:");
+    // the very first request has nothing to remember
+    const first = model.calls.filter((c) => c.purpose === "route")[0]!.prompt;
+    expect(first).not.toContain("EARLIER WORK (");
+    expect(first).not.toContain("FOLLOW-UPS:");
+  });
+});

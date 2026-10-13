@@ -220,7 +220,7 @@ const toolLines = (tools: ToolDescription[]) =>
     })
     .join("\n");
 
-export function operatePlanPrompt(args: { request: string; goal: string; index: OrientIndex; tools: ToolDescription[] }): string {
+export function operatePlanPrompt(args: { request: string; goal: string; index: OrientIndex; tools: ToolDescription[]; context?: string }): string {
   const srcs = args.index.sources
     .slice(0, 45)
     .map((s) => `- [${s.kind}] ${s.label}${s.date ? ` · ${s.date}` : ""}${s.detail ? ` · ${s.detail}` : ""}`)
@@ -229,7 +229,7 @@ export function operatePlanPrompt(args: { request: string; goal: string; index: 
     `TODAY: ${args.index.today}`,
     `REQUEST: ${args.request}`,
     `GOAL: ${args.goal}`,
-    "",
+    args.context ? `EARLIER IN THIS CONVERSATION (what \"those\", \"them\" or \"that list\" may refer to):\n${args.context}\n` : "",
     "You will do this job yourself, by hand, in the company's systems (web apps, mailbox, files), one action at a time.",
     "First write a short plan: 2–6 SUBGOALS in order, each something you can see is finished. Don't plan clicks; plan outcomes.",
     "Prefer the dedicated tools when they exist (mail, files, lookups); use the browser for systems that have no tool.",

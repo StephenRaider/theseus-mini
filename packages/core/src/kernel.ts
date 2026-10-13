@@ -867,7 +867,7 @@ export class Kernel {
         decision = await this.json(
           "route",
           this.system(run),
-          routePrompt({ request: run.task.request, index, playbooks: offered.map((p) => ({ playbook: p, params: pack.params[p.id] ?? {} })), tools: toolList, answers }),
+          routePrompt({ request: run.task.request, index, playbooks: offered.map((p) => ({ playbook: p, params: pack.params[p.id] ?? {} })), tools: toolList, answers, context: this.conversationContext(run) }),
           RouteDecision,
           run.task.id,
         );
@@ -1094,6 +1094,36 @@ export class Kernel {
     this.setStatus(run, "done");
   }
 
+  /**
+   * What the employee remembers of this conversation: the last few messages, and for the last few finished tasks
+   * what each produced (the list of items with their status and the reason it was flagged). Without this a
+   * follow-up like "write to the first 10 of those" has nothing to refer to and the check is simply run again.
+   */
+  conversationContext(run: TaskRun): string {
+    const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n)}…` : t);
+    const msgs = this.log
+      .ofType("message.posted")
+      .filter((m) => m.payload.threadId === run.employeeId && m.payload.ts <= run.task.createdAt && m.payload.id !== undefined)
+      .filter((m) => !(m.payload.from === "user" && m.payload.text === run.task.request));
+    const recent = msgs.slice(-8).map((m) => `${m.payload.from === "user" ? "USER" : "YOU"}: ${clip(m.payload.text.replace(/\n{3,}/g, "\n\n"), m.payload.from === "user" ? 600 : 1200)}`);
+    const earlier = [...this.runs.values()]
+      .filter((r) => r.employeeId === run.employeeId && r.task.id !== run.task.id && r.plan && r.task.createdAt <= run.task.createdAt)
+      .slice(-3)
+      .map((r) => {
+        const plan = r.plan!;
+        const rows = plan.items.map((it) => {
+          const st = itemStatus(plan, it.id);
+          const note = plan.cells[it.id]?.work?.note ?? "";
+          return { line: `  - ${it.label} [${st}${it.holdReason ? `: ${it.holdReason}` : ""}]${note ? ` ${clip(note, 160)}` : ""}`, flagged: st !== "done" || !!it.holdReason || !!note };
+        });
+        // Flagged items first: they are usually what the user means by "those".
+        const shown = [...rows.filter((x) => x.flagged), ...rows.filter((x) => !x.flagged)].slice(0, 60).map((x) => x.line);
+        const facts = r.operate?.facts.slice(0, 12).map((f) => `  - ${f.key} = ${clip(f.value, 120)}`) ?? [];
+        return [`EARLIER WORK (${r.task.id}): "${clip(r.task.request, 200)}" → ${r.task.status}${r.task.goal ? `; goal: ${clip(r.task.goal, 200)}` : ""}`, ...(shown.length ? [`Items (${rows.length}; flagged first):`, ...shown] : []), ...(facts.length ? ["Facts it found:", ...facts] : [])].join("\n");
+      });
+    return [...(recent.length ? ["RECENT MESSAGES:", ...recent] : []), ...earlier].join("\n");
+  }
+
   /** mode=draft: look up the subjects, write the document once, save it as a NEW Word file, send nothing. */
   private async draftDocument(run: TaskRun, decision: RouteDecision) {
     const ask = decision.draft ?? { document: decision.goal, subjects: [] };
@@ -1113,46 +1143,65 @@ export class Kernel {
       this.setStatus(run, "failed", "subject not found");
       return;
     }
-    this.say(run, `Writing ${ask.document}${facts.length ? ` for ${facts.map((f) => f.label).join(", ")}` : ""}, from our records.`);
-    let doc: DraftDoc;
-    try {
-      doc = await this.json(
-        "draft",
-        this.system(run),
-        draftPrompt({ request: run.task.request, document: ask.document, today: this.pack.today(), signoff: this.pack.manifest.persona.signoff, sender: `${this.pack.manifest.persona.signoff}, ${(this.pack.manifest.company ?? "the company").replace(/\s*\(fictional\)/i, "")}`, facts }),
-        DraftDoc,
-        run.task.id,
-      );
-    } catch (e) {
-      this.say(run, `I couldn't write it: ${modelProblem(e)}`);
-      this.setStatus(run, "failed", (e as Error).message);
-      return;
+    // One letter per recipient when the user asked for mails/letters to several parties (never one letter addressed to all).
+    const perRecipient = facts.length > 1 && /\b(mail|e-?mail|letter|notice|note|request|reminder)s?\b/i.test(`${ask.document} ${run.task.request}`) && !/\b(circular|one (letter|mail|note)|single)\b/i.test(run.task.request);
+    const batches = (perRecipient ? facts.slice(0, 12).map((f) => [f]) : [facts]) as LookupResult[][];
+    const skipped = perRecipient ? facts.slice(12) : [];
+    const context = this.conversationContext(run);
+    this.say(run, `Writing ${perRecipient ? `${batches.length} separate ${ask.document.replace(/^an? /i, "")}${batches.length === 1 ? "" : "s"}` : ask.document}${facts.length ? ` for ${facts.map((f) => f.label).join(", ")}` : ""}, from our records.`);
+    const written: { title: string; path: string; label: string }[] = [];
+    const placeholders = new Set<string>();
+    const unsupported: string[] = [];
+    for (const group of batches) {
+      let doc: DraftDoc;
+      try {
+        doc = await this.json(
+          "draft",
+          this.system(run),
+          draftPrompt({ request: run.task.request, document: ask.document, today: this.pack.today(), signoff: this.pack.manifest.persona.signoff, sender: `${this.pack.manifest.persona.signoff}, ${(this.pack.manifest.company ?? "the company").replace(/\s*\(fictional\)/i, "")}`, facts: group, ...(context ? { context } : {}) }),
+          DraftDoc,
+          run.task.id,
+        );
+      } catch (e) {
+        this.say(run, `I couldn't write ${group.map((g) => g.label).join(", ") || "it"}: ${modelProblem(e)}${written.length ? ` (the ${written.length} already written are saved)` : ""}`);
+        if (!written.length) {
+          this.setStatus(run, "failed", (e as Error).message);
+          return;
+        }
+        break;
+      }
+      const allText = [doc.title, doc.subtitle ?? "", ...doc.blocks.flatMap((b) => [b.text ?? "", ...(b.items ?? []), ...(b.rows ?? []).flat()])].join("\n");
+      const unsup = unsupportedClaims(allText, `${run.task.request} ${this.pack.today()} ${context} ${JSON.stringify(group)}`);
+      const file = doc.fileName.replace(/[\\/:*?"<>|]+/g, " ").trim() || "Draft.docx";
+      const r = await this.gateway.call("files.save_docx", { path: `Drafts/${file}`, title: doc.title, ...(doc.subtitle ? { subtitle: doc.subtitle } : {}), blocks: doc.blocks }, { employeeId: run.employeeId, taskId: run.task.id });
+      if (!r.ok) {
+        this.say(run, `I wrote "${doc.title}" but couldn't save it: ${r.error.message}`);
+        if (!written.length) {
+          this.setStatus(run, "failed", r.error.message);
+          return;
+        }
+        continue;
+      }
+      const path = (r.data as { path: string }).path;
+      for (const ph of allText.match(/\[[^\]]{2,40}\]/g) ?? []) placeholders.add(ph);
+      // Today's date belongs on the letter, not in its claims ("effective from <today>").
+      const body = doc.blocks.flatMap((b) => [b.text ?? "", ...(b.items ?? []), ...(b.rows ?? []).flat()]).join("\n");
+      if (dateForms(this.pack.today()).some((f) => body.includes(f))) unsup.push(`today's date used in the text (${this.pack.today()}); is that really when it happened?`);
+      for (const u of unsup) if (!unsupported.includes(u)) unsupported.push(u);
+      written.push({ title: doc.title, path, label: group.map((g) => g.label).join(", ") });
     }
-    const allText = [doc.title, doc.subtitle ?? "", ...doc.blocks.flatMap((b) => [b.text ?? "", ...(b.items ?? []), ...(b.rows ?? []).flat()])].join("\n");
-    const unsupported = unsupportedClaims(allText, `${run.task.request} ${this.pack.today()} ${JSON.stringify(facts)}`);
-    const file = doc.fileName.replace(/[\\/:*?"<>|]+/g, " ").trim() || "Draft.docx";
-    const r = await this.gateway.call("files.save_docx", { path: `Drafts/${file}`, title: doc.title, ...(doc.subtitle ? { subtitle: doc.subtitle } : {}), blocks: doc.blocks }, { employeeId: run.employeeId, taskId: run.task.id });
-    if (!r.ok) {
-      this.say(run, `I wrote it but couldn't save it: ${r.error.message}`);
-      this.setStatus(run, "failed", r.error.message);
-      return;
-    }
-    const path = (r.data as { path: string }).path;
-    const placeholders = [...new Set(allText.match(/\[[^\]]{2,40}\]/g) ?? [])];
-    // Today's date belongs on the letter, not in its claims ("effective from <today>").
-    const body = doc.blocks.flatMap((b) => [b.text ?? "", ...(b.items ?? []), ...(b.rows ?? []).flat()]).join("\n");
-    if (dateForms(this.pack.today()).some((f) => body.includes(f))) unsupported.push(`today's date used in the text (${this.pack.today()}); is that really when it happened?`);
     this.say(
       run,
       [
-        `Done: "${doc.title}" is saved as ${path}. Open it to review.`,
-        placeholders.length ? `Fill in before it goes out: ${placeholders.join(", ")}.` : "",
+        written.length === 1 ? `Done: "${written[0]!.title}" is saved as ${written[0]!.path}. Open it to review.` : `Done: ${written.length} drafts are saved in Drafts:\n${written.map((w) => `• ${w.label || w.title}: ${w.path}`).join("\n")}`,
+        skipped.length ? `I wrote the first ${batches.length} only; not written: ${skipped.map((f) => f.label).join(", ")}. Say the word and I'll do those too.` : "",
+        placeholders.size ? `Fill in before it goes out: ${[...placeholders].join(", ")}.` : "",
         unsupported.length ? `Check these, they aren't in our records: ${unsupported.join(", ")}.` : "",
-        "Nothing has been sent. If you want it emailed, tell me; sending needs your OK.",
+        "Nothing has been sent. If you want them emailed, tell me; sending needs your OK.",
       ]
         .filter(Boolean)
         .join("\n"),
-      [{ name: path.split("/").pop()!, mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ref: `workspace:${path}` }],
+      written.map((w) => ({ name: w.path.split("/").pop()!, mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ref: `workspace:${w.path}` })),
     );
     this.setStatus(run, "done");
   }
@@ -1171,7 +1220,7 @@ export class Kernel {
     for (let attempt = 0; attempt < 3; attempt++) {
       let p: Program;
       try {
-        p = await this.json("compose", this.system(run), composePrompt({ request: run.task.request, goal, index, tools, problems, ...(samples ? { samples } : {}) }), Program, run.task.id);
+        p = await this.json("compose", this.system(run), composePrompt({ request: run.task.request, goal, index, tools, problems, context: this.conversationContext(run), ...(samples ? { samples } : {}) }), Program, run.task.id);
       } catch (e) {
         this.say(run, `I couldn't put together a plan for this: ${modelProblem(e)}`);
         this.setStatus(run, "failed", (e as Error).message);
@@ -1580,7 +1629,7 @@ export class Kernel {
   private async planOperate(run: TaskRun, index: OrientIndex, decision: RouteDecision): Promise<boolean> {
     let plan: OperatePlan;
     try {
-      plan = await this.json("operate.plan", this.system(run), operatePlanPrompt({ request: run.task.request, goal: decision.goal, index, tools: this.gateway.describe() }), OperatePlan, run.task.id);
+      plan = await this.json("operate.plan", this.system(run), operatePlanPrompt({ request: run.task.request, goal: decision.goal, index, tools: this.gateway.describe(), context: this.conversationContext(run) }), OperatePlan, run.task.id);
     } catch (e) {
       this.say(run, `I couldn't plan this: ${modelProblem(e)}`);
       this.setStatus(run, "failed", (e as Error).message);

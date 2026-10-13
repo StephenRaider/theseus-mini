@@ -76,6 +76,8 @@ export function routePrompt(args: {
   playbooks: { playbook: Playbook; params: Record<string, string> }[];
   tools: { name: string; description: string }[];
   answers?: { question: string; answer: string }[];
+  /** The conversation so far and what earlier tasks produced (see Kernel.conversationContext). */
+  context?: string;
 }): string {
   const pbs = args.playbooks
     .map(({ playbook: p, params }) =>
@@ -94,6 +96,7 @@ export function routePrompt(args: {
   return [
     `TODAY: ${args.index.today}`,
     `REQUEST: ${args.request}`,
+    args.context ? `\nTHIS CONVERSATION SO FAR (you were part of it; the user expects you to remember it):\n${args.context}\n` : "",
     args.answers?.length ? `ANSWERS THE USER ALREADY GAVE:\n${args.answers.map((a) => `- ${a.question} → ${a.answer}`).join("\n")}` : "",
     "",
     "PLAYBOOKS (procedures you know well):",
@@ -105,6 +108,10 @@ export function routePrompt(args: {
     "INDEX of what exists right now (files, emails, records):",
     srcs,
     "",
+    ...(args.context ? [
+      "FOLLOW-UPS: the request may refer back to earlier work (\"those\", \"them\", \"that list\", \"the first 10\", \"the ones you found\"). Resolve it from THIS CONVERSATION SO FAR and EARLIER WORK above. If the user wants to ACT on an earlier result (write to them, email them, hold them, report on them), use that result as the list and do NOT run the check again; for a letter to several parties put every party's exact name from the earlier result in draft.subjects (respect \"the first 10\" etc.). Only if the earlier result truly doesn't contain what they mean, ask.",
+      "",
+    ] : []),
     "Decide how to handle the request:",
     "- Out of the role's scope → inScope=false and a polite refusal.",
     "- A question about YOU (what you can do, your skills, your workflow) → mode=about_me. Run nothing.",
@@ -126,11 +133,12 @@ export function routePrompt(args: {
 
 /* ------------------------------------------------------------------ compose (tier 3) */
 
-export function composePrompt(args: { request: string; goal: string; index: OrientIndex; tools: ToolDescription[]; problems?: string[]; samples?: string }): string {
+export function composePrompt(args: { request: string; goal: string; index: OrientIndex; tools: ToolDescription[]; problems?: string[]; samples?: string; context?: string }): string {
   return [
     `TODAY: ${args.index.today}`,
     `REQUEST: ${args.request}`,
     `GOAL: ${args.goal}`,
+    args.context ? `EARLIER IN THIS CONVERSATION:\n${args.context}\n` : "",
     "",
     "Write a small PROGRAM the system will run for you over every item:",
     "1. items: one READ tool call that returns the list of things to check; give listPath (path to the list in its output), idPath and a labelTemplate.",
@@ -213,12 +221,13 @@ export const DraftDoc = z.object({
 });
 export type DraftDoc = z.infer<typeof DraftDoc>;
 
-export function draftPrompt(args: { request: string; document: string; today: string; sender: string; signoff?: string; facts: { label: string; kind: string; facts: Record<string, unknown> }[] }): string {
+export function draftPrompt(args: { request: string; document: string; today: string; sender: string; signoff?: string; context?: string; facts: { label: string; kind: string; facts: Record<string, unknown> }[] }): string {
   return [
     `TODAY: ${args.today}`,
     `REQUEST: ${args.request}`,
     `WRITE: ${args.document}`,
     `FROM: ${args.sender}`,
+    args.context ? `WHY (from earlier in this conversation; use it for the reason you are writing, never as a source of new facts):\n${args.context}` : "",
     "",
     "FACTS from the company's records (the ONLY facts you may use; every name, id, number and date you write must come from here, the request or TODAY):",
     JSON.stringify(args.facts, null, 1),
