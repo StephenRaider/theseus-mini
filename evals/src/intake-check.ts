@@ -152,3 +152,16 @@ export async function draftTexts(ws: string): Promise<{ name: string; text: stri
   for (const p of (await walk(ws)).filter((x) => /^drafts\//i.test(x))) out.push({ name: p.split("/").pop()!, text: await looseText(join(ws, p)).catch(() => "") });
   return out;
 }
+
+/** Every Excel workbook in the workspace (outside the original policy/register/templates): path and lower-cased cell text. */
+export async function workbooks(ws: string): Promise<{ path: string; text: string }[]> {
+  const out: { path: string; text: string }[] = [];
+  for (const p of (await walk(ws)).filter((x) => /\.xlsx$/i.test(x) && !/^(vendor desk|payments)\//i.test(x))) {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(join(ws, p)).catch(() => undefined);
+    const cells: string[] = [];
+    wb.eachSheet((s) => s.eachRow((r) => cells.push((r.values as unknown[]).slice(1).map((v) => String((v as { text?: string })?.text ?? v ?? "")).join(" | "))));
+    out.push({ path: p, text: cells.join("\n").toLowerCase() });
+  }
+  return out;
+}

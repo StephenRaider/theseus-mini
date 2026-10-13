@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Kernel } from "@theseus/core";
 import type { TheseusEvent } from "@theseus/protocol";
-import { checkIntake, draftTexts, originalHashes, snapshot, type Snapshot } from "./intake-check.ts";
+import { checkIntake, draftTexts, originalHashes, snapshot, workbooks, type Snapshot } from "./intake-check.ts";
 import type { World } from "@theseus/server/world";
 
 /**
@@ -518,6 +518,86 @@ export const FOLLOWUP: LiveCase[] = [
         ok("One letter was written, addressed to Malnad Transport Co", drafts.length === 1 && /malnad/.test(drafts[0]!.text), `${drafts.length} drafts`),
         ok("It did not ask 'who do you mean'", !/who (did|do) you mean|which vendor/i.test(c.lastSaid)),
         nothingSent(c),
+      ];
+    },
+  },
+  {
+    id: "followup-recall",
+    title: "Follow-up: 'what was the due date?' answered from what it just did, without redoing the work",
+    request: INVOICE,
+    followups: ["What was the due date and the total of that invoice? Don't check anything again, just tell me."],
+    sets: [],
+    estimateUsd: 0.4,
+    browser: true,
+    check: (c) => {
+      const second = c.runs.at(-1)!.task.id;
+      const reads = c.events.filter((e) => e.type === "tool.called" && e.payload.taskId === second).length;
+      return [
+        done(c),
+        ok("It answered from memory: no tools used in the follow-up", reads === 0, `${reads} tool calls`),
+        ok("The answer has the due date (02/11/2026)", /02\/11\/2026|2 Nov(ember)? 2026|2026-11-02/.test(c.lastSaid), c.lastSaid.slice(0, 160)),
+        ok("The answer has the total (4,27,160)", /4,27,160|427160|427,160/.test(c.lastSaid)),
+        ok("Still exactly one invoice booked", c.world.kaveri!.state.apInvoices.filter((i) => i.number === "HSF/2026/0447").length === 1),
+      ];
+    },
+  },
+  {
+    id: "followup-post-it",
+    title: "Follow-up: 'now post that invoice' acts on the draft it just made (no duplicate)",
+    request: INVOICE,
+    followups: ["Now post that invoice to the ledger."],
+    sets: [],
+    estimateUsd: 0.6,
+    browser: true,
+    approve: "all",
+    check: (c) => {
+      const inv = c.world.kaveri!.state.apInvoices.filter((i) => i.number === "HSF/2026/0447");
+      return [
+        done(c),
+        ok("There is still exactly one invoice (it did not enter a second copy)", inv.length === 1, `${inv.length} invoices`),
+        ok("It is now posted", inv[0]?.status === "posted", `status: ${inv[0]?.status}`),
+        ok("It asked for approval before posting", c.events.some((e) => e.type === "approval.requested")),
+      ];
+    },
+  },
+  {
+    id: "followup-export-held",
+    title: "Follow-up: 'put the held lines in an Excel sheet' (a job no playbook covers: write and save a file from an earlier result)",
+    request: "Run the integrity check on this week's payment batch",
+    followups: ["Put the lines you held into an Excel file called Held Lines.xlsx with the vendor, bill number and the reason each was held."],
+    sets: [],
+    estimateUsd: 0.35,
+    after: async (c) => void (c.notes.sheets = await workbooks(c.world.workspaceDir)),
+    check: (c) => {
+      const sheets = c.notes.sheets as { path: string; text: string }[];
+      const hit = sheets.find((x) => /held/i.test(x.path));
+      const ids = ["PL-03", "PL-08", "PL-10", "PL-11"].map((id) => line(c.world, id));
+      const text = (hit?.text ?? "").toLowerCase();
+      const found = ids.filter((l) => text.includes(l.billNumber.toLowerCase()) || text.includes(l.id.toLowerCase()));
+      const clean = batch(c.world).lines.filter((l) => l.status !== "held").slice(0, 20).filter((l) => text.includes(l.billNumber.toLowerCase()));
+      return [
+        done(c),
+        ok("An Excel file named like 'Held Lines' was saved", !!hit, sheets.map((x) => x.path).join(", ") || "no workbook"),
+        ok("It lists all four held lines (by bill number or line id)", found.length === 4, `found ${found.length}`),
+        ok("It does not list lines that were not held", clean.length === 0, `${clean.length} clean lines in it`),
+        ok("The same four lines are still held (the check was not repeated)", batch(c.world).lines.filter((l) => l.status === "held").length === 4),
+      ];
+    },
+  },
+  {
+    id: "followup-correction",
+    title: "Follow-up: 'sorry, I meant X instead' (a correction replaces the earlier subject)",
+    request: "Tell me everything about Malnad Transport Co",
+    followups: ["Sorry, I meant Bhadra Concrete Works. Draft a short letter to them asking to confirm their bank details."],
+    sets: [],
+    estimateUsd: 0.08,
+    after: async (c) => void (c.notes.drafts = await draftTexts(c.world.workspaceDir)),
+    check: (c) => {
+      const drafts = c.notes.drafts as { name: string; text: string }[];
+      return [
+        done(c),
+        ok("One letter, addressed to Bhadra Concrete Works", drafts.length === 1 && /bhadra/.test(drafts[0]!.text), `${drafts.length} drafts`),
+        ok("It is not addressed to Malnad", drafts.length > 0 && !/dear[^\n]{0,60}malnad/.test(drafts[0]!.text)),
       ];
     },
   },
