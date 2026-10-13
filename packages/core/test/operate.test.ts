@@ -46,6 +46,16 @@ describe("operate: evidence-bound memory", () => {
     expect(sourceOf({ value: "HSF/2026/0447", quote: "Invoice No.:  HSF/2026/0447" }, [seen("Invoice No.:  HSF/2026/0447", false)])).toBeUndefined();
   });
 
+  it("a large record set is shown compactly so every row is visible, and a cut says how to see the rest", () => {
+    const lines = Array.from({ length: 65 }, (_, i) => ({ id: `PL-${String(i + 1).padStart(2, "0")}`, vendorId: "V-1", billNumber: `BILL/2026/${1000 + i}`, status: "pending", description: "Work done as per RA bill", gross: 100000 + i }));
+    const shown = resultText({ id: "PB-1", lines });
+    expect(shown).toContain("PL-65");
+    expect(shown).toContain("BILL/2026/1064");
+    expect(shown).not.toContain("…(cut");
+    const huge = resultText({ lines: Array.from({ length: 4000 }, (_, i) => ({ id: i, text: "x".repeat(40) })) });
+    expect(huge).toMatch(/…\(cut: \d+ more characters were not shown; ask for a narrower view/);
+  });
+
   it("shows pages as their outline and long text fields as text, not escaped JSON", () => {
     expect(resultText({ url: "http://x/a", title: "A", page: "# Hello\n[e1] button \"Go\"" })).toBe('URL: http://x/a\nTITLE: A\nPAGE:\n# Hello\n[e1] button "Go"');
     const t = resultText({ path: "Inv.pdf", text: "Line one\nLine two" });

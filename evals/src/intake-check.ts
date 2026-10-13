@@ -156,7 +156,7 @@ export async function draftTexts(ws: string): Promise<{ name: string; text: stri
 /** Every Excel workbook in the workspace (outside the original policy/register/templates): path and lower-cased cell text. */
 export async function workbooks(ws: string): Promise<{ path: string; text: string }[]> {
   const out: { path: string; text: string }[] = [];
-  for (const p of (await walk(ws)).filter((x) => /\.xlsx$/i.test(x) && !/^(vendor desk|payments)\//i.test(x))) {
+  for (const p of (await walk(ws)).filter((x) => /\.xlsx$/i.test(x) && !/^vendor desk\/vendor register\.xlsx$/i.test(x))) {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(join(ws, p)).catch(() => undefined);
     const cells: string[] = [];

@@ -202,9 +202,16 @@ export function resultText(data: unknown, max = 7000): string {
   if (data && typeof data === "object" && !Array.isArray(data)) {
     const long = Object.entries(data).filter(([, v]) => typeof v === "string" && (v.length > 200 || v.includes("\n")));
     const rest = Object.fromEntries(Object.entries(data).filter(([k]) => !long.some(([l]) => l === k)));
-    t = [JSON.stringify(rest, null, 1), ...long.map(([k, v]) => `${k.toUpperCase()}:\n${v as string}`)].join("\n");
-  } else t = typeof data === "string" ? data : JSON.stringify(data, null, 1);
-  return t.length > max ? `${t.slice(0, max)}\n…(cut)` : t;
+    const tail = long.map(([k, v]) => `${k.toUpperCase()}:\n${v as string}`);
+    t = [JSON.stringify(rest, null, 1), ...tail].join("\n");
+    // A big record set (a 65-line batch) is shown compactly rather than cut: the model needs to see every row.
+    if (t.length > max) t = [JSON.stringify(rest), ...tail].join("\n");
+  } else {
+    t = typeof data === "string" ? data : JSON.stringify(data, null, 1);
+    if (t.length > max && typeof data !== "string") t = JSON.stringify(data);
+  }
+  const hard = max * 2.5;
+  return t.length > hard ? `${t.slice(0, hard)}\n…(cut: ${t.length - hard} more characters were not shown; ask for a narrower view, e.g. one item or one folder, to see the rest)` : t;
 }
 
 /* ------------------------------------------------------------------ prompts */
